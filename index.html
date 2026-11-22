@@ -1915,13 +1915,20 @@ async function loadAndMergeCloud(user) {
   status('☁️ 클라우드 기록을 확인하고 있어요…');
   const ref = doc(db, 'phonics150Users', user.uid);
   try {
+    // 원본 일빵빵의 프로필은 읽기만 합니다. 원본 DB에는 쓰지 않습니다.
+    const familySnap = await getDoc(doc(db, 'ilbbangUsers', user.uid));
+    const familyRaw = familySnap.exists() ? familySnap.data().profiles : null;
+    const familyProfiles = Array.isArray(familyRaw) && familyRaw.length
+      ? familyRaw.slice(0, PROFILE_LIMIT).filter(p => p && p.id).map(p => ({id:String(p.id), name:String(p.name || '프로필')}))
+      : null;
     const snap = await getDoc(ref);
     const localData = readLocalSnapshot();
     if (!snap.exists()) {
-      profiles = [{...DEFAULT_PROFILE}];
-      activeProfileId = DEFAULT_PROFILE.id;
+      profiles = familyProfiles || [{...DEFAULT_PROFILE}];
+      activeProfileId = profiles[0].id;
       localStorage.setItem(ACTIVE_PROFILE_KEY, activeProfileId);
-      profileData = {[activeProfileId]: localData};
+      // 다른 앱에서 생성된 로컬 학습 상태를 가족 구성원에게 임의 배정하지 않습니다.
+      profileData = {[activeProfileId]: familyProfiles ? {} : localData};
       await setDoc(ref, { profiles, activeProfileId, profileData, updatedAt: serverTimestamp() });
       lastCloudData = localData;
       syncReady = true;
@@ -1941,8 +1948,19 @@ async function loadAndMergeCloud(user) {
         localStorage.setItem(ACTIVE_PROFILE_KEY, activeProfileId);
         profileData = {[activeProfileId]: cloud.data || {}};
       }
+      // 파닉스 기존 학습 기록은 보존하며, 가족 프로필 ID/이름만 원본에서 읽어옵니다.
+      // 이전 '나' 프로필 기록은 삭제하지 않고 profileData 안에 보존합니다.
+      const oldProfileIds = new Set(profiles.map(p => p.id));
+      if (familyProfiles) {
+        profiles = familyProfiles;
+        if (!profiles.some(p => p.id === activeProfileId)) {
+          activeProfileId = profiles[0].id;
+          localStorage.setItem(ACTIVE_PROFILE_KEY, activeProfileId);
+        }
+      }
       const prior = profileData[activeProfileId] || {};
-      const merged = mergeSnapshots(prior, localData);
+      const safeLocalData = oldProfileIds.has(activeProfileId) ? localData : {};
+      const merged = mergeSnapshots(prior, safeLocalData);
       profileData[activeProfileId] = merged;
       await setDoc(ref, { profiles, activeProfileId, profileData, updatedAt: serverTimestamp() });
       lastCloudData = merged;
