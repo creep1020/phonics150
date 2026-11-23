@@ -761,50 +761,51 @@ async function startRecording(no){
  if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){alert('HTTPS 크롬에서 녹음 기능을 사용해 주세요.');return;}
  if(activeNo!==null){alert('진행 중인 읽기를 먼저 마쳐 주세요.');return;}
  const item=DATA.flatMap(d=>d.items).find(x=>x.no===no);if(!item)return;
- try{
-  activeNo=no;activeSentence=item;activeChunks=[];activeTranscript='';activeRecognitionError='';
-  recognitionEnded=false;recorderEnded=false;finalizingRecording=false;
-  updateRecordResult(no,'마이크를 준비하고 있어요…');
-  activeStream=await navigator.mediaDevices.getUserMedia({audio:true});
-  activeRecorder=new MediaRecorder(activeStream);
-  activeRecorder.ondataavailable=e=>{if(e.data&&e.data.size)activeChunks.push(e.data);};
-  activeRecorder.onstop=()=>{recorderEnded=true;finishSpeakingAttempt();};
-  activeRecorder.start();
-  const recognition=new Recognition();activeRecognition=recognition;
-  recognition.lang='en-US';recognition.continuous=false;recognition.interimResults=true;recognition.maxAlternatives=5;
-  let latestTranscript='';
-  recognition.onresult=e=>{
-   const parts=[];
-   for(let i=0;i<e.results.length;i++){
-    const text=e.results[i]?.[0]?.transcript||'';
-    if(text)parts.push(text);
-   }
-   latestTranscript=parts.join(' ').trim();activeTranscript=latestTranscript;
-   updateRecordResult(no,'🔴 단어를 읽어 주세요.<br><b>인식 중:</b> '+escapeHtml(latestTranscript));
-  };
-  recognition.onerror=e=>{
-   activeRecognitionError=(e.error||'unknown')+(e.message?' / '+e.message:'');
-   updateRecordResult(no,'음성인식 오류: <b>'+escapeHtml(activeRecognitionError)+'</b><br>녹음은 계속 진행 중이에요.');
-  };
-  recognition.onnomatch=()=>{activeRecognitionError=activeRecognitionError||'no-match';};
-  recognition.onend=()=>{
-   if(!latestTranscript&&!activeRecognitionError)activeRecognitionError='ended-without-result';
-   recognitionEnded=true;
-   if(latestTranscript)activeTranscript=latestTranscript;
+ activeNo=no;activeSentence=item;activeChunks=[];activeTranscript='';activeRecognitionError='';
+ recognitionEnded=false;recorderEnded=false;finalizingRecording=false;
+ // 음성인식과 MediaRecorder가 동시에 마이크를 점유하지 않도록 두 단계로 분리한다.
+ // 1단계: 음성인식만 실행. 2단계: 인식 종료 후 녹음만 실행.
+ window.phonicsVoicePhase='recognition';
+ const btn=document.querySelector(`[data-record="${no}"]`);
+ const recognition=new Recognition();activeRecognition=recognition;
+ recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;
+ let latestTranscript='';
+ recognition.onresult=e=>{
+  const parts=[];for(let i=0;i<e.results.length;i++){const t=e.results[i]?.[0]?.transcript||'';if(t)parts.push(t);}
+  latestTranscript=parts.join(' ').trim();activeTranscript=latestTranscript;
+  updateRecordResult(no,'1단계 · 음성인식 중<br><b>인식:</b> '+escapeHtml(latestTranscript));
+ };
+ recognition.onerror=e=>{activeRecognitionError=(e.error||'unknown')+(e.message?' / '+e.message:'');updateRecordResult(no,'1단계 · 음성인식 오류: '+escapeHtml(activeRecognitionError));};
+ recognition.onnomatch=()=>{activeRecognitionError=activeRecognitionError||'no-match';};
+ recognition.onend=async()=>{
+  if(activeNo!==no||window.phonicsVoicePhase!=='recognition')return;
+  recognitionEnded=true;activeRecognition=null;
+  if(latestTranscript)activeTranscript=latestTranscript;
+  if(!latestTranscript&&!activeRecognitionError)activeRecognitionError='ended-without-result';
+  window.phonicsVoicePhase='preparing-recording';
+  updateRecordResult(no,'1단계 인식 완료: '+(activeTranscript?escapeHtml(activeTranscript):'결과 없음 ('+escapeHtml(activeRecognitionError)+')')+'<br>2단계 녹음을 준비하고 있어요…');
+  try{
+   activeStream=await navigator.mediaDevices.getUserMedia({audio:true});
+   if(activeNo!==no){activeStream.getTracks().forEach(t=>t.stop());activeStream=null;return;}
+   activeRecorder=new MediaRecorder(activeStream);
+   activeRecorder.ondataavailable=e=>{if(e.data&&e.data.size)activeChunks.push(e.data);};
+   activeRecorder.onstop=()=>{recorderEnded=true;window.phonicsVoicePhase='idle';finishSpeakingAttempt();};
+   activeRecorder.start();window.phonicsVoicePhase='recording';
+   updateRecordResult(no,'2단계 · 이제 같은 단어를 한 번 더 읽고 <b>녹음 종료</b>를 눌러 주세요.<br>1단계 인식: '+(activeTranscript?escapeHtml(activeTranscript):'결과 없음 ('+escapeHtml(activeRecognitionError)+')'));
+   if(btn){btn.textContent='⏹ 녹음 종료';btn.disabled=false;}
+  }catch(err){
+   recorderEnded=true;window.phonicsVoicePhase='idle';activeRecognitionError=activeRecognitionError||('recording: '+(err.message||err));
    finishSpeakingAttempt();
-  };
-  updateRecordResult(no,'🔴 녹음 중이에요. 단어를 읽고 잠깐 기다린 뒤 <b>녹음 종료</b>를 눌러 주세요.');
-  const btn=document.querySelector(`[data-record="${no}"]`);if(btn)btn.textContent='⏹ 녹음 종료';
+  }
+ };
+ try{
+  updateRecordResult(no,'1단계 · 먼저 단어를 읽어 주세요. 음성인식만 실행합니다.<br>읽은 뒤 <b>인식 종료</b>를 눌러 주세요.');
+  if(btn){btn.textContent='⏹ 인식 종료';btn.disabled=false;}
   recognition.start();
  }catch(err){
-  try{if(activeRecognition)activeRecognition.abort();}catch(e){}
-  if(activeRecorder&&activeRecorder.state!=='inactive'){try{activeRecorder.stop();}catch(e){}}
-  if(activeStream){activeStream.getTracks().forEach(t=>t.stop());activeStream=null;}
-  activeRecorder=null;activeRecognition=null;activeNo=null;activeSentence=null;
-  activeRecognitionError='';recognitionEnded=true;recorderEnded=true;
-  updateRecordResult(no,'녹음 또는 음성인식을 시작하지 못했어요. 크롬 마이크 권한을 확인해 주세요.');
-  const btn=document.querySelector(`[data-record="${no}"]`);if(btn)btn.textContent='🎙 다시 녹음';
-  alert('녹음/음성인식을 시작하지 못했어요. ('+(err.message||err)+')');
+  activeNo=null;activeSentence=null;activeRecognition=null;recognitionEnded=true;recorderEnded=true;window.phonicsVoicePhase='idle';
+  updateRecordResult(no,'음성인식을 시작하지 못했어요: '+escapeHtml(err.message||String(err)));
+  if(btn)btn.textContent='🎙 다시 녹음';
  }
 }
 function finishRecording(){
@@ -815,10 +816,15 @@ function finishRecording(){
   return;
  }
  if(activeNo===null)return;
- if(activeRecognition){try{activeRecognition.stop()}catch(e){recognitionEnded=true;activeRecognitionError=activeRecognitionError||'stop-failed';}}
- else recognitionEnded=true;
- if(activeRecorder&&activeRecorder.state!=='inactive')activeRecorder.stop();else recorderEnded=true;
- finishSpeakingAttempt();
+ if(window.phonicsVoicePhase==='recognition'){
+  if(activeRecognition){try{activeRecognition.stop()}catch(e){activeRecognitionError=activeRecognitionError||'stop-failed';activeRecognition?.onend?.();}}
+  return;
+ }
+ if(window.phonicsVoicePhase==='preparing-recording')return;
+ if(window.phonicsVoicePhase==='recording'){
+  if(activeRecorder&&activeRecorder.state!=='inactive')activeRecorder.stop();
+  else{recorderEnded=true;finishSpeakingAttempt();}
+ }
 }
 
 function render(){
@@ -856,7 +862,7 @@ function render(){
   const rec=recordingResults[x.no];
   const initial=pass?.passed?`<b>✅ 통과 · 일치율 ${pass.percent}%</b><br>인식 결과: “${escapeHtml(pass.transcript||'')}”`:'';
   const exhausted=false; // 파닉스는 반복 녹음 가능
-  const recordLabel=activeNo===x.no?(phonicsVoicePhase==='recording'?'⏹ 녹음 종료':'⏳ 음성인식 중…'):pass?.passed?'✅ 말하기 통과':exhausted?'📚 복습 대기':attemptCount?`🎙 다시 녹음 (${attemptCount}/3)`:'🎙 녹음';
+  const recordLabel=activeNo===x.no?(window.phonicsVoicePhase==='recording'?'⏹ 녹음 종료':'⏳ 음성인식 중…'):pass?.passed?'✅ 말하기 통과':exhausted?'📚 복습 대기':attemptCount?`🎙 다시 녹음 (${attemptCount}/3)`:'🎙 녹음';
   return `<li><span class="num">${String(x.no).padStart(3,'0')}</span><span class="item-main"><span class="item-text">${x.challenge?`<span style="display:inline-block;font-size:.75em;color:#397557;font-weight:700;margin-bottom:4px">🌟 처음 보는 읽기 도전</span><br>`:""}${text}</span><span class="item-tools"><button class="speak-btn" data-speak="${x.no}" aria-label="영어 문장 듣기">🔊 듣기</button><button class="record-btn" data-record="${x.no}" >${recordLabel}</button><label><input type="checkbox" data-check="${x.no}" ${checked[x.no]?'checked':''}> 학습 완료</label><button class="review-btn ${review[x.no]?'saved':''}" data-review="${x.no}">${review[x.no]?'★ 복습 목록에 있음':'☆ 복습 추가'}</button></span><div class="record-result ${rec||initial?'show':''}" id="record-${x.no}">${rec?.html||initial}${rec?.audioUrl?`<audio controls class="record-audio" src="${rec.audioUrl}"></audio>`:''}</div></span></li>`;
  }).join('');
  // Android WebView에서 부모 요소의 위임 클릭이 누락되는 경우를 피하도록
