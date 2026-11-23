@@ -555,7 +555,7 @@ async function finishSpeakingAttempt(){
  if(no===null||!item)return;
  finalizingRecording=true;
  const percent=speakingMatch(item.en,spoken);
- const passes=!!spoken&&percent>=50;
+ const passes=!!spoken&&percent===100;
  const saved=speakingPasses(),k=speakingKey(no),attemptMap=speakingAttempts();
  let attemptCount=Number(attemptMap[k]||0);
  if(passes){
@@ -565,13 +565,13 @@ async function finishSpeakingAttempt(){
   delete saved[k];attemptCount=Math.min(3,attemptCount+1);attemptMap[k]=attemptCount;
  }
  writeMap(SPEAKING_PASS_KEY,saved);writeMap(SPEAKING_ATTEMPT_KEY,attemptMap);
- if(!passes&&attemptCount>=3)autoAddFailedSpeakingToReview(no);
+ // 인식 실패는 실제 읽기 실패가 아닐 수 있어 자동 복습 등록하지 않습니다.
  const transcript=spoken?`<br><b>인식 결과:</b> “${escapeHtml(spoken)}”`:`<br>인식된 음성이 없어요.${activeRecognitionError?` (오류: ${escapeHtml(activeRecognitionError)})`:''}`;
  let result=passes
-  ?`<b>✅ 통과 · 일치율 ${percent}%</b>${transcript}<br>이 문장은 말하기 학습을 통과했어요.`
-  :attemptCount>=3
-   ?`<b>📚 3회 실패 · 일치율 ${percent}%</b>${transcript}<br>복습 목록에 자동 등록했어요. 오늘 복습에서 다시 말해 주세요.`
-   :`<b>🔁 다시 녹음해 주세요 · 일치율 ${percent}% (${attemptCount}/3회)</b>${transcript}<br>원문 단어의 50% 이상을 순서대로 말해야 통과해요.`;
+  ?`<b>✅ 단어 인식 성공</b>${transcript}<br>내 녹음을 다시 듣고 발음을 확인해요.`
+  :spoken
+   ?`<b>🔁 다시 읽어 볼까요?</b>${transcript}<br>기대 단어: <b>${escapeHtml(item.en)}</b> · 기기 인식은 정확하지 않을 수 있어요.`
+   :`<b>🎧 녹음 완료 · 음성인식 결과 없음</b>${transcript}<br>내 목소리를 재생해 확인해요. 마이크를 가까이하고 단어를 읽은 뒤 잠깐 기다렸다가 종료해 보세요. 인식 실패만으로 오답 처리하지 않아요.`;
  const mime=activeRecorder?.mimeType||activeChunks[0]?.type||'audio/webm';
  const blob=new Blob(activeChunks,{type:mime});
  recordingResults[no]=recordingResults[no]||{};
@@ -739,7 +739,7 @@ window.onIlbbangNativeVoiceResult=async function(result){
 
 async function startRecording(no){
  const attemptKey=speakingKey(no),attemptCount=Number(speakingAttempts()[attemptKey]||0);
- if(attemptCount>=3&&!speakingPasses()[attemptKey]?.passed){alert('이 문장은 3회 도전을 마쳤어요. 오늘 복습 목록에서 다시 연습해 주세요.');return;}
+ // 파닉스: 브라우저 인식 실패로 녹음 시도를 차단하지 않습니다.
  if(window.IlbbangAndroid&&typeof window.IlbbangAndroid.startRecording==='function'){
   if(activeNo!==null||nativeVoicePending){alert('이전 문장의 음성 확인이 끝나지 않았어요. 잠시만 기다려 주세요.');return;}
   const item=DATA.flatMap(d=>d.items).find(x=>x.no===no);if(!item)return;
@@ -771,10 +771,8 @@ async function startRecording(no){
   activeRecorder=new MediaRecorder(activeStream);
   activeRecorder.ondataavailable=e=>{if(e.data&&e.data.size)activeChunks.push(e.data)};
   activeRecorder.onstop=()=>{recorderEnded=true;finishSpeakingAttempt();};
-  activeRecorder.start();
-
   const recognition=new Recognition();activeRecognition=recognition;
-  recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;
+  recognition.lang='en-US';recognition.continuous=false;recognition.interimResults=true;recognition.maxAlternatives=3;
   let latestTranscript='';
   recognition.onresult=e=>{
    const parts=[];
@@ -784,7 +782,7 @@ async function startRecording(no){
    }
    latestTranscript=parts.join(' ').trim();
    activeTranscript=latestTranscript;
-   updateRecordResult(no,`🔴 문장을 영어로 말해 주세요.<br><b>인식 중:</b> ${escapeHtml(latestTranscript)}`);
+   updateRecordResult(no,`🔴 단어를 읽어 주세요.<br><b>인식 중:</b> ${escapeHtml(latestTranscript)}`);
   };
   recognition.onerror=e=>{
    activeRecognitionError=e.error||'unknown';
@@ -795,9 +793,9 @@ async function startRecording(no){
    if(latestTranscript)activeTranscript=latestTranscript;
    finishSpeakingAttempt();
   };
-  updateRecordResult(no,'🔴 녹음 중이에요. 영어 문장을 말해 주세요. 다 말한 뒤 <b>녹음 종료</b>를 누르면 일치율을 확인합니다.');
+  updateRecordResult(no,'🔴 단어를 또렷하게 읽어 주세요. 말한 뒤 1초 정도 기다리고 <b>녹음 종료</b>를 누르세요.');
   const btn=document.querySelector(`[data-record="${no}"]`);if(btn)btn.textContent='⏹ 녹음 종료';
-  try{recognition.start();}
+  try{recognition.start();activeRecorder.start();}
   catch(e){activeRecognitionError='recognition-start-failed';throw e;}
  }catch(err){
   try{if(activeRecognition)activeRecognition.abort()}catch(e){}
