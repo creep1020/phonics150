@@ -737,8 +737,7 @@ window.onIlbbangNativeVoiceResult=async function(result){
  }
 };
 
-// 실험본: 한 번 읽기 동시 실행. 실패 시 순차 실행 기준본으로 복귀하세요.
-let phonicsVoicePhase='idle';
+// 일빵빵 1권에서 정상 작동한 녹음 먼저 / 음성인식 나중 실행 방식
 async function startRecording(no){
  const attemptKey=speakingKey(no),attemptCount=Number(speakingAttempts()[attemptKey]||0);
  if(window.IlbbangAndroid&&typeof window.IlbbangAndroid.startRecording==='function'){
@@ -762,45 +761,48 @@ async function startRecording(no){
  if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){alert('HTTPS 크롬에서 녹음 기능을 사용해 주세요.');return;}
  if(activeNo!==null){alert('진행 중인 읽기를 먼저 마쳐 주세요.');return;}
  const item=DATA.flatMap(d=>d.items).find(x=>x.no===no);if(!item)return;
- activeNo=no;activeSentence=item;activeChunks=[];activeTranscript='';activeRecognitionError='';
- recognitionEnded=false;recorderEnded=false;finalizingRecording=false;
- phonicsVoicePhase='recognizing';
- const recognition=new Recognition();activeRecognition=recognition;
- recognition.lang='en-US';recognition.continuous=false;recognition.interimResults=false;recognition.maxAlternatives=3;
- let gotResult=false;
- recognition.onresult=e=>{
-  const transcript=Array.from(e.results||[]).map(r=>r[0]?.transcript||'').join(' ').trim();
-  if(transcript){activeTranscript=transcript;gotResult=true;}
-  updateRecordResult(no,'🗣️ 인식 결과: '+escapeHtml(activeTranscript||'결과 없음')+'<br>이제 녹음을 준비할게요.');
- };
- recognition.onerror=e=>{activeRecognitionError=e.error||'unknown';};
- recognition.onend=()=>{
-  if(activeNo!==no)return;
-  recognitionEnded=true;activeRecognition=null;
-  if(phonicsVoicePhase==='recognizing'){
-   // 인식이 너무 빨리 종료된 경우에도 녹음은 그대로 유지합니다.
-   phonicsVoicePhase='recording';
-  }
-  if(recorderEnded)finishSpeakingAttempt();
- };
- // 실험 모드: 음성인식 시작 후 동일한 발화를 MediaRecorder에도 담습니다.
- // 일부 안드로이드 크롬 환경에서는 마이크 동시 접근으로 인식이 실패할 수 있습니다.
  try{
-  recognition.start();
+  activeNo=no;activeSentence=item;activeChunks=[];activeTranscript='';activeRecognitionError='';
+  recognitionEnded=false;recorderEnded=false;finalizingRecording=false;
+  updateRecordResult(no,'마이크를 준비하고 있어요…');
   activeStream=await navigator.mediaDevices.getUserMedia({audio:true});
-  if(activeNo!==no){activeStream.getTracks().forEach(t=>t.stop());return;}
   activeRecorder=new MediaRecorder(activeStream);
   activeRecorder.ondataavailable=e=>{if(e.data&&e.data.size)activeChunks.push(e.data);};
-  activeRecorder.onstop=()=>{recorderEnded=true;if(activeRecognition){try{activeRecognition.stop();}catch(e){}}if(recognitionEnded)finishSpeakingAttempt();};
+  activeRecorder.onstop=()=>{recorderEnded=true;finishSpeakingAttempt();};
   activeRecorder.start();
-  phonicsVoicePhase='recording';
-  updateRecordResult(no,'🎤 단어를 <b>한 번</b> 읽어 주세요. 음성인식과 녹음을 함께 시험 중입니다. 읽은 뒤 잠시 기다렸다가 녹음 종료를 누르세요.');
+  const recognition=new Recognition();activeRecognition=recognition;
+  recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;
+  let latestTranscript='';
+  recognition.onresult=e=>{
+   const parts=[];
+   for(let i=0;i<e.results.length;i++){
+    const text=e.results[i]?.[0]?.transcript||'';
+    if(text)parts.push(text);
+   }
+   latestTranscript=parts.join(' ').trim();activeTranscript=latestTranscript;
+   updateRecordResult(no,'🔴 단어를 읽어 주세요.<br><b>인식 중:</b> '+escapeHtml(latestTranscript));
+  };
+  recognition.onerror=e=>{
+   activeRecognitionError=e.error||'unknown';
+   updateRecordResult(no,'음성인식 오류: <b>'+escapeHtml(activeRecognitionError)+'</b><br>녹음은 계속 진행 중이에요.');
+  };
+  recognition.onend=()=>{
+   recognitionEnded=true;
+   if(latestTranscript)activeTranscript=latestTranscript;
+   finishSpeakingAttempt();
+  };
+  updateRecordResult(no,'🔴 녹음 중이에요. 단어를 읽고 잠깐 기다린 뒤 <b>녹음 종료</b>를 눌러 주세요.');
   const btn=document.querySelector(`[data-record="${no}"]`);if(btn)btn.textContent='⏹ 녹음 종료';
+  recognition.start();
  }catch(err){
-  activeRecognitionError=err.message||'microphone start failed';
-  if(activeRecognition){try{activeRecognition.abort();}catch(e){}}
-  recognitionEnded=true;recorderEnded=true;phonicsVoicePhase='idle';
-  finishSpeakingAttempt();
+  try{if(activeRecognition)activeRecognition.abort();}catch(e){}
+  if(activeRecorder&&activeRecorder.state!=='inactive'){try{activeRecorder.stop();}catch(e){}}
+  if(activeStream){activeStream.getTracks().forEach(t=>t.stop());activeStream=null;}
+  activeRecorder=null;activeRecognition=null;activeNo=null;activeSentence=null;
+  activeRecognitionError='';recognitionEnded=true;recorderEnded=true;
+  updateRecordResult(no,'녹음 또는 음성인식을 시작하지 못했어요. 크롬 마이크 권한을 확인해 주세요.');
+  const btn=document.querySelector(`[data-record="${no}"]`);if(btn)btn.textContent='🎙 다시 녹음';
+  alert('녹음/음성인식을 시작하지 못했어요. ('+(err.message||err)+')');
  }
 }
 function finishRecording(){
@@ -811,13 +813,10 @@ function finishRecording(){
   return;
  }
  if(activeNo===null)return;
- if(phonicsVoicePhase==='recognizing'||phonicsVoicePhase==='opening-recorder'){
-  updateRecordResult(activeNo,'⏳ 음성인식이 끝나고 녹음이 시작될 때까지 기다려 주세요.');return;
- }
- if(phonicsVoicePhase!=='recording')return;
- phonicsVoicePhase='finishing';
- if(activeRecorder&&activeRecorder.state!=='inactive')activeRecorder.stop();
- else{recorderEnded=true;finishSpeakingAttempt();}
+ if(activeRecognition){try{activeRecognition.stop()}catch(e){recognitionEnded=true;}}
+ else recognitionEnded=true;
+ if(activeRecorder&&activeRecorder.state!=='inactive')activeRecorder.stop();else recorderEnded=true;
+ finishSpeakingAttempt();
 }
 
 function render(){
