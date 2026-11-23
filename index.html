@@ -358,7 +358,7 @@ function setupMinseoFootball(){
  FOOTBALL_PLAYERS.forEach(([id,name])=>picker.add(new Option(name,id)));
  picker.addEventListener('change',()=>{
   const hasChoice=!!localStorage.getItem(minseoFootballStorageKey());
-  if(!hasChoice){return;} // 최초 선택은 '이 선수로 시작하기'에서만 확정
+  if(!hasChoice){refreshMinseoFootball();return;} // 최초 선택 전에는 저장하지 않고 미리보기만 갱신
   if(window.ilbbangIsParentSettingsUnlocked?.()!==true){refreshMinseoFootball();return;}
   localStorage.setItem(minseoFootballStorageKey(),picker.value);refreshMinseoFootball();
  });
