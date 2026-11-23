@@ -37,9 +37,13 @@ jobs:
 
       - name: Create Android project
         run: |
-                  cp gradle.properties ./gradle.properties
           mkdir -p app/src/main/java/com/creep1020/phonics150
           mkdir -p app/src/main/res/drawable
+
+          cat > gradle.properties <<'EOF'
+          android.useAndroidX=true
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          EOF
 
           cat > settings.gradle <<'EOF'
           pluginManagement {
