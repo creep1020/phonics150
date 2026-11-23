@@ -287,7 +287,7 @@ image.src=KEKE_STAGE_IMAGES[stage-1];
 }
 
 const FOOTBALL_PLAYERS = [['messi','메시'],['mbappe','음바페'],['son','손흥민'],['yamal','야말'],['haaland','홀란'],['ronaldo','호날두'],['neymar','네이마르'],['kane','해리 케인'],['bellingham','벨링엄'],['dembele','뎀벨레']];
-const FOOTBALL_CHOICE_KEY='ilbbangMinseoFootballChoice';
+const FOOTBALL_CHOICE_KEY='phonics150MinseoFootballChoice'; // 파닉스 최초 선택만 별도로 관리; 일빵빵 원본 기록 불변
 function minseoFootballProfileId(){const el=document.getElementById('profileSelect');return el?.value||'';}
 function minseoFootballStorageKey(){return FOOTBALL_CHOICE_KEY+':'+minseoFootballProfileId();}
 // Minseo-only presentation: never change stored stars, awards, or learning records.
@@ -331,7 +331,7 @@ function refreshMinseoFootball(){
  if(!original)return;
  const art=document.getElementById('minseoFootballArt');
  if(!eligible){original.style.display='';if(art)art.hidden=true;updateMinseoFootballLabels(false,'',Math.max(1,Math.min(6,parseInt(document.getElementById('kekeStagePill')?.textContent)||1)));return;}
- const saved=localStorage.getItem(minseoFootballStorageKey()) || localStorage.getItem(FOOTBALL_CHOICE_KEY);
+ const saved=localStorage.getItem(minseoFootballStorageKey()); // 기존 일빵빵 선수 선택을 최초 선택 완료로 간주하지 않음
  const chosen=FOOTBALL_PLAYERS.some(p=>p[0]===saved)?saved:(document.getElementById('minseoFootballSelect')?.value||'messi');
  const picker=document.getElementById('minseoFootballSelect');if(picker && saved)picker.value=chosen;
  const parentCanChange=window.ilbbangIsParentSettingsUnlocked?.()===true;
@@ -357,7 +357,7 @@ function setupMinseoFootball(){
  const picker=document.getElementById('minseoFootballSelect');
  FOOTBALL_PLAYERS.forEach(([id,name])=>picker.add(new Option(name,id)));
  picker.addEventListener('change',()=>{
-  const hasChoice=!!(localStorage.getItem(minseoFootballStorageKey())||localStorage.getItem(FOOTBALL_CHOICE_KEY));
+  const hasChoice=!!localStorage.getItem(minseoFootballStorageKey());
   if(!hasChoice){return;} // 최초 선택은 '이 선수로 시작하기'에서만 확정
   if(window.ilbbangIsParentSettingsUnlocked?.()!==true){refreshMinseoFootball();return;}
   localStorage.setItem(minseoFootballStorageKey(),picker.value);refreshMinseoFootball();
@@ -365,7 +365,7 @@ function setupMinseoFootball(){
  const startBtn=document.getElementById('minseoFootballStart');
  if(startBtn)startBtn.addEventListener('click',()=>{
   if(document.getElementById('profileSelect')?.selectedOptions?.[0]?.textContent?.trim()!=='민서')return;
-  if(localStorage.getItem(minseoFootballStorageKey())||localStorage.getItem(FOOTBALL_CHOICE_KEY)){refreshMinseoFootball();return;}
+  if(localStorage.getItem(minseoFootballStorageKey())){refreshMinseoFootball();return;}
   if(!FOOTBALL_PLAYERS.some(p=>p[0]===picker.value))return;
   localStorage.setItem(minseoFootballStorageKey(),picker.value);
   refreshMinseoFootball();
