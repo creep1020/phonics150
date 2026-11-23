@@ -566,7 +566,7 @@ async function finishSpeakingAttempt(){
  }
  writeMap(SPEAKING_PASS_KEY,saved);writeMap(SPEAKING_ATTEMPT_KEY,attemptMap);
  // 인식 실패는 실제 읽기 실패가 아닐 수 있어 자동 복습 등록하지 않습니다.
- const transcript=spoken?`<br><b>인식 결과:</b> “${escapeHtml(spoken)}”`:`<br>인식된 음성이 없어요.${activeRecognitionError?` (오류: ${escapeHtml(activeRecognitionError)})`:''}`;
+ const transcript=spoken?`<br><b>인식 결과:</b> “${escapeHtml(spoken)}”`:`<br>인식된 음성이 없어요. <b>진단: ${escapeHtml(activeRecognitionError||'결과 미수신')}</b>`;
  let result=passes
   ?`<b>✅ 단어 인식 성공</b>${transcript}<br>내 녹음을 다시 듣고 발음을 확인해요.`
   :spoken
@@ -771,7 +771,7 @@ async function startRecording(no){
   activeRecorder.onstop=()=>{recorderEnded=true;finishSpeakingAttempt();};
   activeRecorder.start();
   const recognition=new Recognition();activeRecognition=recognition;
-  recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;
+  recognition.lang='en-US';recognition.continuous=false;recognition.interimResults=true;recognition.maxAlternatives=5;
   let latestTranscript='';
   recognition.onresult=e=>{
    const parts=[];
@@ -783,10 +783,12 @@ async function startRecording(no){
    updateRecordResult(no,'🔴 단어를 읽어 주세요.<br><b>인식 중:</b> '+escapeHtml(latestTranscript));
   };
   recognition.onerror=e=>{
-   activeRecognitionError=e.error||'unknown';
+   activeRecognitionError=(e.error||'unknown')+(e.message?' / '+e.message:'');
    updateRecordResult(no,'음성인식 오류: <b>'+escapeHtml(activeRecognitionError)+'</b><br>녹음은 계속 진행 중이에요.');
   };
+  recognition.onnomatch=()=>{activeRecognitionError=activeRecognitionError||'no-match';};
   recognition.onend=()=>{
+   if(!latestTranscript&&!activeRecognitionError)activeRecognitionError='ended-without-result';
    recognitionEnded=true;
    if(latestTranscript)activeTranscript=latestTranscript;
    finishSpeakingAttempt();
@@ -813,7 +815,7 @@ function finishRecording(){
   return;
  }
  if(activeNo===null)return;
- if(activeRecognition){try{activeRecognition.stop()}catch(e){recognitionEnded=true;}}
+ if(activeRecognition){try{activeRecognition.stop()}catch(e){recognitionEnded=true;activeRecognitionError=activeRecognitionError||'stop-failed';}}
  else recognitionEnded=true;
  if(activeRecorder&&activeRecorder.state!=='inactive')activeRecorder.stop();else recorderEnded=true;
  finishSpeakingAttempt();
