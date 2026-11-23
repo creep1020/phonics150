@@ -135,4 +135,3 @@ jobs:
         with:
           name: PHONICS150-family-APK
           path: app/build/outputs/apk/debug/app-debug.apk
-EOF
