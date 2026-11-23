@@ -737,7 +737,7 @@ window.onIlbbangNativeVoiceResult=async function(result){
  }
 };
 
-// 웹 브라우저: 음성인식과 녹음을 동시에 열지 않고 순서대로 실행합니다.
+// 실험본: 한 번 읽기 동시 실행. 실패 시 순차 실행 기준본으로 복귀하세요.
 let phonicsVoicePhase='idle';
 async function startRecording(no){
  const attemptKey=speakingKey(no),attemptCount=Number(speakingAttempts()[attemptKey]||0);
@@ -774,30 +774,31 @@ async function startRecording(no){
   updateRecordResult(no,'🗣️ 인식 결과: '+escapeHtml(activeTranscript||'결과 없음')+'<br>이제 녹음을 준비할게요.');
  };
  recognition.onerror=e=>{activeRecognitionError=e.error||'unknown';};
- recognition.onend=async()=>{
-  if(activeNo!==no||phonicsVoicePhase!=='recognizing')return;
+ recognition.onend=()=>{
+  if(activeNo!==no)return;
   recognitionEnded=true;activeRecognition=null;
-  phonicsVoicePhase='opening-recorder';
-  try{
-   // 음성인식 마이크가 해제된 다음에만 녹음 마이크를 엽니다.
-   activeStream=await navigator.mediaDevices.getUserMedia({audio:true});
-   if(activeNo!==no){activeStream.getTracks().forEach(t=>t.stop());return;}
-   activeRecorder=new MediaRecorder(activeStream);
-   activeRecorder.ondataavailable=e=>{if(e.data&&e.data.size)activeChunks.push(e.data);};
-   activeRecorder.onstop=()=>{recorderEnded=true;finishSpeakingAttempt();};
-   activeRecorder.start();phonicsVoicePhase='recording';
-   updateRecordResult(no,'🗣️ 인식 결과: '+escapeHtml(activeTranscript||'없음')+'<br>🔴 이제 단어를 <b>한 번 더 읽어 녹음</b>해 주세요. 끝나면 녹음 종료를 누르세요.');
-   const btn=document.querySelector(`[data-record="${no}"]`);if(btn)btn.textContent='⏹ 녹음 종료';
-  }catch(err){
-   activeRecognitionError=activeRecognitionError||('recording: '+(err.message||String(err)));
-   recorderEnded=true;finishSpeakingAttempt();
+  if(phonicsVoicePhase==='recognizing'){
+   // 인식이 너무 빨리 종료된 경우에도 녹음은 그대로 유지합니다.
+   phonicsVoicePhase='recording';
   }
+  if(recorderEnded)finishSpeakingAttempt();
  };
- updateRecordResult(no,'🎤 1단계: 단어를 한 번 읽어 주세요. 음성인식이 끝나면 2단계 녹음이 시작됩니다.');
- const btn=document.querySelector(`[data-record="${no}"]`);if(btn)btn.textContent='⏳ 음성인식 중…';
- try{recognition.start();}
- catch(err){
-  activeRecognitionError=err.message||'start failed';
+ // 실험 모드: 음성인식 시작 후 동일한 발화를 MediaRecorder에도 담습니다.
+ // 일부 안드로이드 크롬 환경에서는 마이크 동시 접근으로 인식이 실패할 수 있습니다.
+ try{
+  recognition.start();
+  activeStream=await navigator.mediaDevices.getUserMedia({audio:true});
+  if(activeNo!==no){activeStream.getTracks().forEach(t=>t.stop());return;}
+  activeRecorder=new MediaRecorder(activeStream);
+  activeRecorder.ondataavailable=e=>{if(e.data&&e.data.size)activeChunks.push(e.data);};
+  activeRecorder.onstop=()=>{recorderEnded=true;if(activeRecognition){try{activeRecognition.stop();}catch(e){}}if(recognitionEnded)finishSpeakingAttempt();};
+  activeRecorder.start();
+  phonicsVoicePhase='recording';
+  updateRecordResult(no,'🎤 단어를 <b>한 번</b> 읽어 주세요. 음성인식과 녹음을 함께 시험 중입니다. 읽은 뒤 잠시 기다렸다가 녹음 종료를 누르세요.');
+  const btn=document.querySelector(`[data-record="${no}"]`);if(btn)btn.textContent='⏹ 녹음 종료';
+ }catch(err){
+  activeRecognitionError=err.message||'microphone start failed';
+  if(activeRecognition){try{activeRecognition.abort();}catch(e){}}
   recognitionEnded=true;recorderEnded=true;phonicsVoicePhase='idle';
   finishSpeakingAttempt();
  }
