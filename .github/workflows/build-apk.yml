@@ -2,6 +2,11 @@ name: Build PHONICS 150 APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-apk.yml'
 
 permissions:
   contents: read
@@ -22,9 +27,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -90,13 +94,16 @@ jobs:
                   android:label="PHONICS 150"
                   android:icon="@drawable/app_icon"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
                   <activity
                       android:name=".MainActivity"
                       android:exported="true">
+
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
+
                   </activity>
               </application>
           </manifest>
@@ -114,12 +121,16 @@ jobs:
               @Override
               protected void onCreate(Bundle state) {
                   super.onCreate(state);
+
                   CustomTabsIntent tabs =
                       new CustomTabsIntent.Builder().build();
+
                   tabs.intent.setPackage("com.android.chrome");
+
                   tabs.launchUrl(this, Uri.parse(
                       "https://creep1020.github.io/phonics150/"
                   ));
+
                   finish();
               }
           }
