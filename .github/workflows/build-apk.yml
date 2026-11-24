@@ -1,153 +1,193 @@
-name: Build PHONICS 150 APK
-
+name: Build PHONICS 150 native voice APK
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/build-apk.yml'
-
 permissions:
   contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-
-      - name: Create Android project
+      - name: Create native app
         run: |
-          mkdir -p app/src/main/java/com/creep1020/phonics150
-          mkdir -p app/src/main/res/drawable
-
-          cat > gradle.properties <<'EOF'
-          android.useAndroidX=true
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-          EOF
-
-          cat > settings.gradle <<'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
+          mkdir -p app/src/main/java/com/creep1020/phonics150 app/src/main/res/drawable
+          cp icon-512.png app/src/main/res/drawable/app_icon.png
+          cat > settings.gradle <<'GRADLE'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
           rootProject.name = 'Phonics150'
           include ':app'
-          EOF
-
-          cat > build.gradle <<'EOF'
+          GRADLE
+          cat > gradle.properties <<'GRADLE'
+          android.useAndroidX=true
+          org.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8
+          GRADLE
+          cat > build.gradle <<'GRADLE'
           plugins {
-              id 'com.android.application' version '8.7.3' apply false
+            id 'com.android.application' version '8.7.3' apply false
+            id 'org.jetbrains.kotlin.android' version '2.1.21' apply false
           }
-          EOF
-
-          cat > app/build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application'
-          }
-
+          GRADLE
+          cat > app/build.gradle <<'GRADLE'
+          plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
           android {
-              namespace 'com.creep1020.phonics150'
-              compileSdk 35
-
-              defaultConfig {
-                  applicationId 'com.creep1020.phonics150'
-                  minSdk 26
-                  targetSdk 35
-                  versionCode 2
-                  versionName '1.1'
-              }
+            namespace 'com.creep1020.phonics150'
+            compileSdk 35
+            defaultConfig { applicationId 'com.creep1020.phonics150.nativevoice'; minSdk 31; targetSdk 35; versionCode 7; versionName '1.7-test' }
+            compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+            kotlinOptions { jvmTarget = '17' }
           }
-
           dependencies {
-              implementation 'androidx.browser:browser:1.8.0'
+            implementation 'com.google.mlkit:genai-speech-recognition:1.0.0-alpha2'
+            implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
           }
-          EOF
-
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          GRADLE
+          cat > app/src/main/AndroidManifest.xml <<'XML'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <application
-                  android:label="PHONICS 150"
-                  android:icon="@drawable/app_icon"
-                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
-
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true">
-
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-
-                  </activity>
-              </application>
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+            <application android:label="PHONICS 150 음성 테스트" android:icon="@drawable/app_icon" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
+              <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+            </application>
           </manifest>
-          EOF
+          XML
+          cat > app/src/main/java/com/creep1020/phonics150/MainActivity.kt <<'KOTLIN'
+          package com.creep1020.phonics150
+          import android.Manifest
+          import android.app.Activity
+          import android.content.pm.PackageManager
+          import android.media.MediaRecorder
+          import android.os.Bundle
+          import android.webkit.*
+          import android.util.Base64
+          import com.google.mlkit.genai.common.FeatureStatus
+          import com.google.mlkit.genai.common.audio.AudioSource
+          import com.google.mlkit.genai.speechrecognition.*
+          import kotlinx.coroutines.*
+          import kotlinx.coroutines.flow.collect
+          import org.json.JSONObject
+          import java.io.File
+          import java.util.Locale
 
-          cat > app/src/main/java/com/creep1020/phonics150/MainActivity.java <<'EOF'
-          package com.creep1020.phonics150;
-
-          import android.app.Activity;
-          import android.os.Bundle;
-          import android.net.Uri;
-          import androidx.browser.customtabs.CustomTabsIntent;
-
-          public class MainActivity extends Activity {
-              @Override
-              protected void onCreate(Bundle state) {
-                  super.onCreate(state);
-
-                  CustomTabsIntent tabs =
-                      new CustomTabsIntent.Builder().build();
-
-                  tabs.intent.setPackage("com.android.chrome");
-
-                  tabs.launchUrl(this, Uri.parse(
-                      "https://creep1020.github.io/phonics150/"
-                  ));
-
-                  finish();
+          class MainActivity : Activity() {
+            private lateinit var web: WebView
+            private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+            private var recorder: MediaRecorder? = null
+            private var file: File? = null
+            private var active: String? = null
+            private var job: Job? = null
+            private val url = "https://creep1020.github.io/phonics150/"
+            override fun onCreate(state: Bundle?) {
+              super.onCreate(state)
+              web = WebView(this)
+              setContentView(web)
+              web.settings.javaScriptEnabled = true
+              web.settings.domStorageEnabled = true
+              web.settings.allowFileAccess = false
+              web.settings.allowContentAccess = false
+              web.settings.mediaPlaybackRequiresUserGesture = false
+              web.webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
+                  return r.url.scheme != "https" || r.url.host != "creep1020.github.io" || !(r.url.path ?: "").startsWith("/phonics150/")
+                }
               }
+              web.addJavascriptInterface(Bridge(), "IlbbangAndroid")
+              web.loadUrl(url)
+            }
+            private fun status(id: String, s: String) { web.evaluateJavascript("window.onIlbbangNativeVoiceStatus?.(${JSONObject.quote(id)},${JSONObject.quote(s)})", null) }
+            private fun result(id: String, text: String, error: String, audio: String = "") {
+              if (active != id) return
+              val obj = JSONObject().put("requestId",id).put("transcript",text).put("error",error).put("audioBase64",audio).put("mimeType","audio/mp4")
+              active = null
+              file?.delete(); file = null
+              web.evaluateJavascript("window.onIlbbangNativeVoiceResult?.($obj)", null)
+            }
+            inner class Bridge {
+              @JavascriptInterface fun startRecording(id: String, mode: String) { runOnUiThread {
+                if (active != null) return@runOnUiThread
+                active = id
+                status(id,"preparing")
+                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 10) else begin(id)
+              } }
+              @JavascriptInterface fun stopRecording(id: String) { runOnUiThread { finishVoice(id) } }
+              @JavascriptInterface fun cancelRecording(id: String) { runOnUiThread { if (active == id) clearVoice() } }
+            }
+            override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
+              super.onRequestPermissionsResult(requestCode,permissions,results)
+              if(requestCode == 10) active?.let { if(results.firstOrNull() == PackageManager.PERMISSION_GRANTED) begin(it) else result(it,"","마이크 권한이 필요해요.") }
+            }
+            private fun begin(id: String) {
+              try {
+                file = File.createTempFile("phonics-", ".m4a", cacheDir)
+                val r = MediaRecorder(this)
+                recorder = r
+                r.setAudioSource(MediaRecorder.AudioSource.MIC)
+                r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                r.setAudioChannels(1)
+                r.setAudioSamplingRate(16000)
+                r.setOutputFile(file!!.absolutePath)
+                r.prepare(); r.start()
+                status(id,"recording")
+              } catch(e: Exception) { recorder?.release(); recorder=null; result(id,"",e.message ?: "녹음 시작 실패") }
+            }
+            private fun finishVoice(id: String) {
+              if(active != id) return
+              val r = recorder ?: return
+              recorder = null
+              try { r.stop() } catch(e: Exception) { r.release(); result(id,"","녹음 시간이 너무 짧아요."); return }
+              r.release()
+              val f = file ?: return
+              status(id,"checking")
+              job = scope.launch {
+                var audio = ""
+                try {
+                  audio = withContext(Dispatchers.IO) { Base64.encodeToString(f.readBytes(), Base64.NO_WRAP) }
+                  val client = SpeechRecognition.getClient(speechRecognizerOptions { locale = Locale.US; preferredMode = SpeechRecognizerOptions.Mode.MODE_BASIC })
+                  try {
+                    withTimeout(55000) {
+                      if(client.checkStatus() == FeatureStatus.DOWNLOADABLE) { status(id,"downloading"); client.download().collect {} }
+                      if(client.checkStatus() != FeatureStatus.AVAILABLE) error("영어 음성인식 모델을 사용할 수 없어요.")
+                    }
+                    status(id,"recognizing")
+                    val parts = mutableListOf<String>()
+                    var partial = ""
+                    withTimeout(30000) {
+                      val source = AudioSource.fromFile(f)
+                      try {
+                        client.startRecognition(speechRecognizerRequest { audioSource = source }).collect { response ->
+                          when(response) {
+                            is SpeechRecognizerResponse.FinalTextResponse -> parts.add(response.text)
+                            is SpeechRecognizerResponse.PartialTextResponse -> partial = response.text
+                            is SpeechRecognizerResponse.ErrorResponse -> error(response.e.message ?: "인식 오류")
+                            else -> Unit
+                          }
+                        }
+                      } finally { source.close() }
+                    }
+                    val text = parts.joinToString(" ").ifBlank { partial }
+                    result(id,text,if(text.isBlank()) "인식 결과 없음" else "",audio)
+                  } finally { client.close() }
+                } catch(e: Exception) { if(active == id) result(id,"",e.message ?: "음성인식 실패",audio) }
+              }
+            }
+            private fun clearVoice() { active=null; job?.cancel(); job=null; recorder?.let { try { it.stop() } catch(_:Exception) {}; it.release() }; recorder=null; file?.delete(); file=null }
+            override fun onDestroy() { clearVoice(); scope.cancel(); web.removeJavascriptInterface("IlbbangAndroid"); web.destroy(); super.onDestroy() }
           }
-          EOF
-
-          cp icon-512.png app/src/main/res/drawable/app_icon.png
-
+          KOTLIN
       - name: Build APK
         run: gradle assembleDebug --no-daemon
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: PHONICS150-family-APK
+          name: PHONICS150-native-voice-test
           path: app/build/outputs/apk/debug/app-debug.apk
