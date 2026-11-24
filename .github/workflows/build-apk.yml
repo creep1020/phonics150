@@ -45,7 +45,7 @@ jobs:
           android {
             namespace 'com.creep1020.phonics150'
             compileSdk 35
-            defaultConfig { applicationId 'com.creep1020.phonics150.nativevoice'; minSdk 31; targetSdk 35; versionCode 7; versionName '1.7-test' }
+            defaultConfig { applicationId 'com.creep1020.phonics150.nativevoice'; minSdk 31; targetSdk 35; versionCode 8; versionName '1.8-test' }
             compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
             
           }
@@ -59,7 +59,8 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
             <uses-permission android:name="android.permission.INTERNET"/>
             <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-            <application android:label="PHONICS 150 음성 테스트" android:icon="@drawable/app_icon" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
+            <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
+          <application android:label="PHONICS 150 음성 테스트" android:icon="@drawable/app_icon" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
               <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
             </application>
           </manifest>
@@ -70,6 +71,11 @@ jobs:
           import android.app.Activity
           import android.content.pm.PackageManager
           import android.media.MediaRecorder
+          import android.media.AudioRecord
+          import android.media.AudioFormat
+          import android.speech.tts.TextToSpeech
+          import android.widget.Toast
+          import java.io.RandomAccessFile
           import android.os.Bundle
           import android.webkit.*
           import android.util.Base64
@@ -85,13 +91,26 @@ jobs:
           class MainActivity : Activity() {
             private lateinit var web: WebView
             private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-            private var recorder: MediaRecorder? = null
+            private var recorder: AudioRecord? = null
+            @Volatile private var capturing = false
+            private var writer: Thread? = null
+            @Volatile private var captureError: String? = null
+            private var tts: TextToSpeech? = null
+            @Volatile private var englishReady = false
             private var file: File? = null
             private var active: String? = null
             private var job: Job? = null
             private val url = "https://creep1020.github.io/phonics150/"
             override fun onCreate(state: Bundle?) {
               super.onCreate(state)
+              tts = TextToSpeech(this) { code ->
+                runOnUiThread {
+                  if (code == TextToSpeech.SUCCESS) {
+                    val language = tts?.setLanguage(Locale.US) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                    englishReady = language >= TextToSpeech.LANG_AVAILABLE
+                  }
+                }
+              }
               web = WebView(this)
               setContentView(web)
               web.settings.javaScriptEnabled = true
@@ -110,12 +129,19 @@ jobs:
             private fun status(id: String, s: String) { web.evaluateJavascript("window.onIlbbangNativeVoiceStatus?.(${JSONObject.quote(id)},${JSONObject.quote(s)})", null) }
             private fun result(id: String, text: String, error: String, audio: String = "") {
               if (active != id) return
-              val obj = JSONObject().put("requestId",id).put("transcript",text).put("error",error).put("audioBase64",audio).put("mimeType","audio/mp4")
+              val obj = JSONObject().put("requestId",id).put("transcript",text).put("error",error).put("audioBase64",audio).put("mimeType","audio/wav")
+              if (error.isNotBlank()) Toast.makeText(this, "음성인식: $error", Toast.LENGTH_LONG).show()
               active = null
               file?.delete(); file = null
               web.evaluateJavascript("window.onIlbbangNativeVoiceResult?.($obj)", null)
             }
             inner class Bridge {
+              @JavascriptInterface fun canSpeakEnglish(): Boolean = englishReady
+              @JavascriptInterface fun speak(text: String, rate: Float) { runOnUiThread {
+                if (englishReady) { tts?.setSpeechRate(rate.coerceIn(0.3f, 2f)); tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "phonics-tts") }
+                else Toast.makeText(this@MainActivity, "영어 TTS 음성을 확인해 주세요.", Toast.LENGTH_LONG).show()
+              } }
+              @JavascriptInterface fun stopSpeaking() { runOnUiThread { tts?.stop() } }
               @JavascriptInterface fun startRecording(id: String, mode: String) { runOnUiThread {
                 if (active != null) return@runOnUiThread
                 active = id
@@ -129,27 +155,52 @@ jobs:
               super.onRequestPermissionsResult(requestCode,permissions,results)
               if(requestCode == 10) active?.let { if(results.firstOrNull() == PackageManager.PERMISSION_GRANTED) begin(it) else result(it,"","마이크 권한이 필요해요.") }
             }
+            private fun wavHeader(out: RandomAccessFile, bytes: Int) {
+              fun le32(n: Int) { out.writeInt(Integer.reverseBytes(n)) }
+              fun le16(n: Int) { out.writeShort(java.lang.Short.reverseBytes(n.toShort()).toInt()) }
+              out.seek(0); out.writeBytes("RIFF"); le32(36 + bytes); out.writeBytes("WAVEfmt "); le32(16)
+              le16(1); le16(1); le32(16000); le32(32000); le16(2); le16(16); out.writeBytes("data"); le32(bytes)
+            }
             private fun begin(id: String) {
               try {
-                file = File.createTempFile("phonics-", ".m4a", cacheDir)
-                val r = MediaRecorder(this)
+                tts?.stop()
+                file = File.createTempFile("phonics-", ".wav", cacheDir)
+                val f = file!!
+                val size = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                require(size > 0) { "PCM 녹음 버퍼 오류: $size" }
+                val r = AudioRecord(MediaRecorder.AudioSource.MIC, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, size * 2)
                 recorder = r
-                r.setAudioSource(MediaRecorder.AudioSource.MIC)
-                r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                r.setAudioChannels(1)
-                r.setAudioSamplingRate(16000)
-                r.setOutputFile(file!!.absolutePath)
-                r.prepare(); r.start()
+                require(r.state == AudioRecord.STATE_INITIALIZED) { "PCM 녹음 초기화 실패" }
+                captureError = null
+                r.startRecording(); capturing = true
+                writer = Thread {
+                  try {
+                    RandomAccessFile(f, "rw").use { out ->
+                      wavHeader(out, 0)
+                      val buffer = ByteArray(size)
+                      var total = 0
+                      while (capturing) {
+                        val n = r.read(buffer, 0, buffer.size)
+                        if (n > 0) { out.write(buffer, 0, n); total += n }
+                        else if (n < 0 && capturing) error("PCM 읽기 오류: $n")
+                      }
+                      wavHeader(out, total)
+                    }
+                  } catch(e: Exception) { captureError = e.message ?: "PCM 저장 실패" }
+                }.also { it.start() }
                 status(id,"recording")
-              } catch(e: Exception) { recorder?.release(); recorder=null; result(id,"",e.message ?: "녹음 시작 실패") }
+              } catch(e: Exception) { stopCapture(); result(id,"",e.message ?: "녹음 시작 실패") }
+            }
+            private fun stopCapture() {
+              capturing = false
+              recorder?.let { try { it.stop() } catch(_: Exception) {} }
+              try { writer?.join(1500) } catch(_: InterruptedException) {}
+              recorder?.release(); recorder = null; writer = null
             }
             private fun finishVoice(id: String) {
-              if(active != id) return
-              val r = recorder ?: return
-              recorder = null
-              try { r.stop() } catch(e: Exception) { r.release(); result(id,"","녹음 시간이 너무 짧아요."); return }
-              r.release()
+              if(active != id || recorder == null) return
+              stopCapture()
+              if(captureError != null) { result(id,"",captureError!!); return }
               val f = file ?: return
               status(id,"checking")
               job = scope.launch {
@@ -162,6 +213,7 @@ jobs:
                       if(client.checkStatus() == FeatureStatus.DOWNLOADABLE) { status(id,"downloading"); client.download().collect {} }
                       if(client.checkStatus() != FeatureStatus.AVAILABLE) error("영어 음성인식 모델을 사용할 수 없어요.")
                     }
+                    status(id,"model-ready")
                     status(id,"recognizing")
                     val parts = mutableListOf<String>()
                     var partial = ""
@@ -181,11 +233,11 @@ jobs:
                     val text = parts.joinToString(" ").ifBlank { partial }
                     result(id,text,if(text.isBlank()) "인식 결과 없음" else "",audio)
                   } finally { client.close() }
-                } catch(e: Exception) { if(active == id) result(id,"",e.message ?: "음성인식 실패",audio) }
+                } catch(e: Exception) { if(active == id) result(id,"",e.javaClass.simpleName + ": " + (e.message ?: "음성인식 실패"),audio) }
               }
             }
-            private fun clearVoice() { active=null; job?.cancel(); job=null; recorder?.let { try { it.stop() } catch(_:Exception) {}; it.release() }; recorder=null; file?.delete(); file=null }
-            override fun onDestroy() { clearVoice(); scope.cancel(); web.removeJavascriptInterface("IlbbangAndroid"); web.destroy(); super.onDestroy() }
+            private fun clearVoice() { active=null; job?.cancel(); job=null; stopCapture(); file?.delete(); file=null }
+            override fun onDestroy() { clearVoice(); scope.cancel(); tts?.stop(); tts?.shutdown(); web.removeJavascriptInterface("IlbbangAndroid"); web.destroy(); super.onDestroy() }
           }
           KOTLIN
       - name: Build APK
