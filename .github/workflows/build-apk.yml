@@ -45,7 +45,7 @@ jobs:
           android {
             namespace 'com.creep1020.phonics150'
             compileSdk 35
-            defaultConfig { applicationId 'com.creep1020.phonics150.nativevoice'; minSdk 31; targetSdk 35; versionCode 9; versionName '1.9-test' }
+            defaultConfig { applicationId 'com.creep1020.phonics150.nativevoice'; minSdk 31; targetSdk 35; versionCode 10; versionName '1.10-test' }
             compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
             
           }
@@ -70,6 +70,10 @@ jobs:
           import android.Manifest
           import android.app.Activity
           import android.content.pm.PackageManager
+          import android.media.MediaExtractor
+          import android.media.MediaCodec
+          import android.media.MediaFormat
+          import java.io.ByteArrayOutputStream
           import android.media.MediaRecorder
           import android.media.AudioRecord
           import android.media.AudioFormat
@@ -110,7 +114,7 @@ jobs:
                     val language = tts?.setLanguage(Locale.US) ?: TextToSpeech.LANG_NOT_SUPPORTED
                     englishReady = language >= TextToSpeech.LANG_AVAILABLE
                     if (!englishReady) englishReady = (tts?.setLanguage(Locale.ENGLISH) ?: -2) >= 0
-                    Toast.makeText(this, "v9 TTS: $language / $englishReady", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "v10 TTS: $language / $englishReady", Toast.LENGTH_LONG).show()
                   }
                 }
               }
@@ -129,7 +133,7 @@ jobs:
               web.addJavascriptInterface(Bridge(), "IlbbangAndroid")
               web.settings.cacheMode = WebSettings.LOAD_NO_CACHE
               web.clearCache(true)
-              web.loadUrl(url + "?native=9")
+              web.loadUrl(url + "?native=10")
             }
             private fun status(id: String, s: String) { web.evaluateJavascript("window.onIlbbangNativeVoiceStatus?.(${JSONObject.quote(id)},${JSONObject.quote(s)})", null) }
             private fun result(id: String, text: String, error: String, audio: String = "") {
@@ -185,6 +189,69 @@ jobs:
               recorder?.let { r -> try { r.stop() } catch(e: Exception) { captureError = e.message ?: "녹음 종료 실패" } finally { r.release() } }
               recorder = null
             }
+            // Decode the saved recording; preserve the original M4A for playback.
+            private fun recognitionWav(input: File): File {
+              val extractor = MediaExtractor()
+              var decoder: MediaCodec? = null
+              try {
+                extractor.setDataSource(input.absolutePath)
+                val track = (0 until extractor.trackCount).first { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                extractor.selectTrack(track)
+                val format = extractor.getTrackFormat(track)
+                val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+                decoder = codec
+                codec.configure(format, null, null, 0); codec.start()
+                var rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                val pcm = ByteArrayOutputStream()
+                val info = MediaCodec.BufferInfo()
+                var sent = false; var done = false
+                val deadline = android.os.SystemClock.elapsedRealtime() + 15000
+                while (!done && android.os.SystemClock.elapsedRealtime() < deadline) {
+                  if (!sent) {
+                    val i = codec.dequeueInputBuffer(10000)
+                    if (i >= 0) {
+                      val b = codec.getInputBuffer(i)!!; b.clear()
+                      val n = extractor.readSampleData(b, 0)
+                      if (n < 0) { codec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); sent = true }
+                      else { codec.queueInputBuffer(i, 0, n, extractor.sampleTime, 0); extractor.advance() }
+                    }
+                  }
+                  val o = codec.dequeueOutputBuffer(info, 10000)
+                  if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    val fmt = codec.outputFormat
+                    rate = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE); channels = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    if (fmt.containsKey(MediaFormat.KEY_PCM_ENCODING)) require(fmt.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_16BIT) { "PCM encoding unsupported" }
+                  } else if (o >= 0) {
+                    if (info.size > 0) { val b = codec.getOutputBuffer(o)!!; b.position(info.offset); b.limit(info.offset + info.size); val chunk = ByteArray(info.size); b.get(chunk); pcm.write(chunk) }
+                    done = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                    codec.releaseOutputBuffer(o, false)
+                  }
+                }
+                require(done) { "Audio decode timeout" }
+                val raw = pcm.toByteArray(); val frames = raw.size / (2 * channels)
+                require(frames > 0 && rate > 0) { "Empty decoded audio" }
+                val mono = ShortArray(frames) { i ->
+                  var sum = 0
+                  for (c in 0 until channels) { val k = (i * channels + c) * 2; sum += ((raw[k].toInt() and 255) or (raw[k+1].toInt() shl 8)).toShort().toInt() }
+                  (sum / channels).toShort()
+                }
+                val count = (frames.toLong() * 16000 / rate).toInt().coerceAtLeast(1)
+                val samples = ByteArray(count * 2)
+                for (i in 0 until count) {
+                  val pos = i.toDouble() * rate / 16000; val j = pos.toInt().coerceAtMost(frames-1); val k = (j+1).coerceAtMost(frames-1)
+                  val v = (mono[j] + (mono[k]-mono[j]) * (pos-j)).toInt().coerceIn(-32768,32767)
+                  samples[i*2] = v.toByte(); samples[i*2+1] = (v shr 8).toByte()
+                }
+                val output = File.createTempFile("recognition-", ".wav", cacheDir)
+                RandomAccessFile(output,"rw").use { out ->
+                  val lead = ByteArray(6400); val tail = ByteArray(32000)
+                  wavHeader(out, lead.size + samples.size + tail.size)
+                  out.write(lead); out.write(samples); out.write(tail)
+                }
+                return output
+              } finally { try { decoder?.release() } finally { extractor.release() } }
+            }
             private fun finishVoice(id: String) {
               if(active != id || recorder == null) return
               stopCapture()
@@ -206,18 +273,19 @@ jobs:
                     val parts = mutableListOf<String>()
                     var partial = ""
                     withTimeout(30000) {
-                      val source = AudioSource.fromFile(f)
+                      val prepared = withContext(Dispatchers.IO) { recognitionWav(f) }
+                      val source = AudioSource.fromFile(prepared)
                       try {
                         client.startRecognition(speechRecognizerRequest { audioSource = source }).first { response ->
                           when(response) {
                             is SpeechRecognizerResponse.FinalTextResponse -> parts.add(response.text)
                             is SpeechRecognizerResponse.PartialTextResponse -> partial = response.text
-                            is SpeechRecognizerResponse.ErrorResponse -> error(response.e.message ?: "인식 오류")
+                            is SpeechRecognizerResponse.ErrorResponse -> if (parts.isEmpty() && partial.isBlank()) error(response.e.message ?: "인식 오류") else Unit
                             else -> Unit
                           }
-                          response is SpeechRecognizerResponse.CompletedResponse
+                          response is SpeechRecognizerResponse.CompletedResponse || response is SpeechRecognizerResponse.ErrorResponse
                         }
-                      } finally { source.close() }
+                      } finally { source.close(); prepared.delete() }
                     }
                     val text = parts.joinToString(" ").ifBlank { partial }
                     result(id,text,if(text.isBlank()) "인식 결과 없음" else "",audio)
@@ -233,5 +301,5 @@ jobs:
         run: gradle assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: PHONICS150-native-voice-v9
+          name: PHONICS150-native-voice-v10
           path: app/build/outputs/apk/debug/app-debug.apk
