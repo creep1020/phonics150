@@ -33,7 +33,7 @@ messaging.onBackgroundMessage(payload => {
 });
 
 // v10: 최신 HTML 배포본 우선 적용
-const CACHE = 'phonics150-voice-v4-shared-20261124';
+const CACHE = 'phonics150-original-voice-v5';
 
 const FILES = [
   './',
@@ -68,7 +68,7 @@ self.addEventListener('activate', event => {
     await Promise.all(
       keys
         .filter(key =>
-          key.startsWith('ilppang-seq-') && key !== CACHE
+          key.startsWith('phonics150-') && key !== CACHE
         )
         .map(key => caches.delete(key))
     );
