@@ -738,7 +738,64 @@ window.onIlbbangNativeVoiceResult=async function(result){
 };
 
 // 일빵빵 1권에서 정상 작동한 녹음 먼저 / 음성인식 나중 실행 방식
+// v4: experimental shared audio track; keep the proven v3 path intact.
 async function startRecording(no){
+ if(window.IlbbangAndroid?.startRecording || sessionStorage.getItem('phonicsVoiceV4Fallback')==='1')return startRecordingV3(no);
+ const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!Recognition||!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)return startRecordingV3(no);
+ if(activeNo!==null)return;
+ const item=DATA.flatMap(d=>d.items).find(x=>x.no===no);if(!item)return;
+ activeNo=no;activeSentence=item;activeChunks=[];activeTranscript='';activeRecognitionError='';
+ recognitionEnded=false;recorderEnded=false;finalizingRecording=false;
+ window.phonicsVoicePhase='shared-preparing';
+ const btn=document.querySelector(`[data-record="${no}"]`);
+ if(btn){btn.disabled=true;btn.textContent='마이크 준비 중…';}
+ let rec,recognition,timer,closed=false,stopping=false;
+ const fallback=async(reason)=>{
+  if(closed)return;closed=true;clearTimeout(timer);
+  sessionStorage.setItem('phonicsVoiceV4Fallback','1');
+  if(recognition){recognition.onend=null;recognition.onerror=null;recognition.onresult=null;try{recognition.abort()}catch(e){}}
+  if(rec){rec.onstop=null;rec.ondataavailable=null;try{if(rec.state!=='inactive')rec.stop()}catch(e){}}
+  if(activeStream)activeStream.getTracks().forEach(t=>t.stop());
+  activeStream=null;activeRecorder=null;activeRecognition=null;activeNo=null;activeSentence=null;
+  recognitionEnded=true;recorderEnded=true;window.phonicsVoicePhase='idle';
+  render();updateRecordResult(no,'한 번 읽기 미지원 ('+escapeHtml(reason)+') · 다시 녹음을 누르면 정상 작동하는 2단계 방식으로 진행해요.');
+ };
+ const complete=()=>{
+  if(closed||!recognitionEnded||!recorderEnded)return;
+  if(!activeTranscript||!activeChunks.some(b=>b.size)){fallback(activeRecognitionError||'결과 없음');return;}
+  closed=true;clearTimeout(timer);window.phonicsVoicePhase='idle';finishSpeakingAttempt();
+ };
+ try{
+  activeStream=await navigator.mediaDevices.getUserMedia({audio:true});
+  const track=activeStream.getAudioTracks()[0];if(!track)throw Error('audio track unavailable');
+  rec=new MediaRecorder(activeStream);activeRecorder=rec;
+  recognition=new Recognition();activeRecognition=recognition;
+  recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;
+  rec.ondataavailable=e=>{if(!closed&&e.data?.size)activeChunks.push(e.data);};
+  rec.onstop=()=>{recorderEnded=true;complete();};
+  rec.onerror=()=>fallback('recording error');
+  recognition.onresult=e=>{if(closed)return;activeTranscript=Array.from(e.results,r=>r[0]?.transcript||'').join(' ').trim();updateRecordResult(no,'한 번 읽기 · 인식: '+escapeHtml(activeTranscript));};
+  recognition.onerror=e=>{activeRecognitionError=e.error||'unknown';if(!activeTranscript)fallback(activeRecognitionError);};
+  recognition.onnomatch=()=>{activeRecognitionError='no-match';};
+  recognition.onend=()=>{recognitionEnded=true;if(!stopping)stopShared();complete();};
+  function stopShared(){
+   if(closed||stopping)return;stopping=true;clearTimeout(timer);
+   if(btn){btn.disabled=true;btn.textContent='결과 확인 중…';}
+   if(!recognitionEnded){try{recognition.stop()}catch(e){recognitionEnded=true;}}
+   if(rec.state!=='inactive')rec.stop();else recorderEnded=true;
+   timer=setTimeout(()=>{if(!closed){if(activeTranscript&&recorderEnded){recognitionEnded=true;complete();}else fallback('timeout');}},5000);
+   complete();
+  }
+  window.phonicsStopShared=stopShared;
+  rec.start();recognition.start(track);
+  window.phonicsVoicePhase='shared';
+  updateRecordResult(no,'v4 · 한 번 읽기 시험 중. 단어를 읽고 잠시 기다린 뒤 종료하세요.');
+  if(btn){btn.disabled=false;btn.textContent='⏹ 녹음 종료';}
+  timer=setTimeout(stopShared,20000);
+ }catch(e){fallback(e.message||String(e));}
+}
+async function startRecordingV3(no){
  const attemptKey=speakingKey(no),attemptCount=Number(speakingAttempts()[attemptKey]||0);
  if(window.IlbbangAndroid&&typeof window.IlbbangAndroid.startRecording==='function'){
   if(activeNo!==null||nativeVoicePending){alert('이전 문장의 음성 확인이 끝나지 않았어요. 잠시만 기다려 주세요.');return;}
@@ -816,6 +873,8 @@ function finishRecording(){
   return;
  }
  if(activeNo===null)return;
+ if(window.phonicsVoicePhase==='shared'){window.phonicsStopShared?.();return;}
+ if(window.phonicsVoicePhase==='shared-preparing')return;
  if(window.phonicsVoicePhase==='recognition'){
   if(activeRecognition){try{activeRecognition.stop()}catch(e){activeRecognitionError=activeRecognitionError||'stop-failed';activeRecognition?.onend?.();}}
   return;
@@ -862,7 +921,7 @@ function render(){
   const rec=recordingResults[x.no];
   const initial=pass?.passed?`<b>✅ 통과 · 일치율 ${pass.percent}%</b><br>인식 결과: “${escapeHtml(pass.transcript||'')}”`:'';
   const exhausted=false; // 파닉스는 반복 녹음 가능
-  const recordLabel=activeNo===x.no?(window.phonicsVoicePhase==='recording'?'⏹ 녹음 종료':'⏳ 음성인식 중…'):pass?.passed?'✅ 말하기 통과':exhausted?'📚 복습 대기':attemptCount?`🎙 다시 녹음 (${attemptCount}/3)`:'🎙 녹음';
+  const recordLabel=activeNo===x.no?(['recording','shared'].includes(window.phonicsVoicePhase)?'⏹ 녹음 종료':'⏳ 음성인식 중…'):pass?.passed?'✅ 말하기 통과':exhausted?'📚 복습 대기':attemptCount?`🎙 다시 녹음 (${attemptCount}/3)`:'🎙 녹음';
   return `<li><span class="num">${String(x.no).padStart(3,'0')}</span><span class="item-main"><span class="item-text">${x.challenge?`<span style="display:inline-block;font-size:.75em;color:#397557;font-weight:700;margin-bottom:4px">🌟 처음 보는 읽기 도전</span><br>`:""}${text}</span><span class="item-tools"><button class="speak-btn" data-speak="${x.no}" aria-label="영어 문장 듣기">🔊 듣기</button><button class="record-btn" data-record="${x.no}" >${recordLabel}</button><label><input type="checkbox" data-check="${x.no}" ${checked[x.no]?'checked':''}> 학습 완료</label><button class="review-btn ${review[x.no]?'saved':''}" data-review="${x.no}">${review[x.no]?'★ 복습 목록에 있음':'☆ 복습 추가'}</button></span><div class="record-result ${rec||initial?'show':''}" id="record-${x.no}">${rec?.html||initial}${rec?.audioUrl?`<audio controls class="record-audio" src="${rec.audioUrl}"></audio>`:''}</div></span></li>`;
  }).join('');
  // Android WebView에서 부모 요소의 위임 클릭이 누락되는 경우를 피하도록

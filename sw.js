@@ -33,7 +33,7 @@ messaging.onBackgroundMessage(payload => {
 });
 
 // v10: 최신 HTML 배포본 우선 적용
-const CACHE = 'phonics150-voice-v3-fixed-20261123';
+const CACHE = 'phonics150-voice-v4-shared-20261124';
 
 const FILES = [
   './',
