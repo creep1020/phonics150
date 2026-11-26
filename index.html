@@ -1656,6 +1656,8 @@ function mergeSnapshots(cloudData, localData) {
   for (const key of ['phonics150SeqStart','phonics150VoiceRate']) {
     if (cloudData?.[key] === undefined && localData?.[key] !== undefined) merged[key] = localData[key];
   }
+  const cloudReset=cloudData?.[REVIEW_RESET_KEY]||'', localReset=localData?.[REVIEW_RESET_KEY]||'';
+  if(cloudReset!==localReset){const fresh=cloudReset>localReset?cloudData:localData; for(const k of STUDY_RESET_KEYS) merged[k]=fresh?.[k]||'{}'; merged['phonics150SeqStart']=fresh?.['phonics150SeqStart']||iso(today);}
   return merged;
 }
 function applySnapshot(data) {
@@ -1756,81 +1758,45 @@ $login('notifySave').onclick = async () => {
     else $login('notifyStatus').textContent = '가족 알림을 껐어요. 기기 등록 정보는 유지되며 발송 대상에서 제외됩니다.';
   } catch (err) { $login('notifyStatus').textContent = '저장 또는 푸시 연결 실패: ' + (err.code || err.message) + ' · Firestore 보안 규칙을 확인해 주세요.'; }
 };
+const STUDY_RESET_KEYS=['phonics150SeqRecords','phonics150SeqChecked','phonics150SeqReview',REVIEW_SCHEDULE_KEY,DAILY_REVIEW_KEY,SPEAKING_PASS_KEY,SPEAKING_ATTEMPT_KEY];
 $login('resetStudyRecords').onclick = async () => {
-  if (!parentSettingsUnlocked || !syncReady || !currentUid) {
-    $login('resetStudyStatus').textContent = '부모 PIN 잠금 해제와 클라우드 로그인이 필요합니다.';
-    return;
-  }
+  const out = $login('resetStudyStatus');
+  if (!parentSettingsUnlocked || !syncReady || !currentUid) { out.textContent = '부모 PIN 잠금 해제와 클라우드 로그인이 필요합니다.'; return; }
   const selected = profiles.find(p => p.id === activeProfileId);
   if (!selected) return;
-  if (!confirm(`현재 선택된 '${selected.name}' 프로필의 학습 진행을 초기화할까요?\n\nDAY가 1일차로 돌아가고, 문장 체크·말하기 통과·날짜별 완료 기록·복습 목록·복습 일정이 삭제됩니다. 별·보상·게임 기록과 다른 프로필은 그대로 유지됩니다.`)) return;
-  const phrase = prompt(`마지막 확인입니다.
-
-초기화할 프로필: ${selected.name}
-
-DAY를 1일차로 되돌리고 학습·말하기·복습 기록을 지우려면 프로필 이름을 똑같이 입력해 주세요.`);
-  if (phrase !== selected.name) {
-    $login('resetStudyStatus').textContent = '프로필 이름이 일치하지 않아 초기화를 취소했어요.';
-    return;
-  }
-  const before = readLocalSnapshot();
-  const resetDayNo = currentDay();
-  try {
-    localStorage.setItem('phonics150SeqRecords', '{}');
-    localStorage.setItem('phonics150SeqChecked', '{}');
-    localStorage.setItem('phonics150SeqReview', '{}');
-    localStorage.setItem(REVIEW_SCHEDULE_KEY, '{}');
-    localStorage.setItem(DAILY_REVIEW_KEY, '{}');
-    localStorage.setItem(REVIEW_RESET_KEY, new Date().toISOString());
-    localStorage.setItem(SPEAKING_PASS_KEY, '{}');
-    localStorage.setItem(SPEAKING_ATTEMPT_KEY, '{}');
-    localStorage.setItem('phonics150SeqStart', iso(today));
-
-    window.phonicsResetStudyView();
-    // 현재 화면에 남아 있는 말하기 통과 문구·인식 결과·녹음 재생 URL도 함께 비웁니다.
-    if (activeStream) { activeStream.getTracks().forEach(track => track.stop()); activeStream = null; }
-    if (activeRecorder && activeRecorder.state !== 'inactive') { try { activeRecorder.stop(); } catch (e) {} }
-    activeRecorder = null; activeRecognition = null; activeNo = null; activeSentence = null;
-    activeChunks = []; activeTranscript = ''; activeRecognitionError = '';
-    recorderEnded = true; recognitionEnded = true; finalizingRecording = false;
-    Object.keys(recordingResults).forEach(no => {
-      const result = recordingResults[no];
-      if (result?.audioUrl) URL.revokeObjectURL(result.audioUrl);
-      delete recordingResults[no];
-    });
-    // 녹음 DB 키는 날짜·DAY·문장 번호로 저장되므로 초기화 시 현재 학습 세션의 녹음도 제거합니다.
+  const panel = document.createElement('div');
+  const info = document.createElement('p'); info.textContent = `${selected.name} 프로필의 파닉스 학습 기록만 초기화합니다. 별과 캐릭터는 유지됩니다. 확인하려면 프로필 이름을 입력하세요.`;
+  const input = document.createElement('input'); input.placeholder = '프로필 이름';
+  const yes = document.createElement('button'); yes.type='button'; yes.textContent='초기화 확정';
+  const no = document.createElement('button'); no.type='button'; no.textContent='취소';
+  panel.append(info,input,yes,no); out.replaceChildren(panel);
+  no.onclick=()=>{out.textContent='초기화를 취소했어요.';};
+  yes.onclick=async()=>{
+    if(input.value.trim()!==selected.name || activeProfileId!==selected.id || !parentSettingsUnlocked){info.textContent='프로필 이름 또는 부모 잠금 상태를 확인하세요.';return;}
+    yes.disabled=true; no.disabled=true;
+    clearTimeout(saveTimer); switchingProfile=true; suppressSync=true;
+    const before=readLocalSnapshot(); const next={...before};
+    for(const k of STUDY_RESET_KEYS) next[k]='{}';
+    next['phonics150SeqStart']=iso(today); next[REVIEW_RESET_KEY]=new Date().toISOString();
     try {
-      const db = await recordingDb();
-      await new Promise((resolve, reject) => {
-        const tx = db.transaction('audio', 'readwrite');
-        const store = tx.objectStore('audio');
-        const prefix = key(iso(today), resetDayNo) + '|';
-        const req = store.openCursor();
-        req.onsuccess = () => {
-          const cursor = req.result;
-          if (!cursor) return;
-          if (String(cursor.value?.id || '').startsWith(prefix)) cursor.delete();
-          cursor.continue();
-        };
-        req.onerror = () => reject(req.error || new Error('녹음 기록 정리 실패'));
-        tx.oncomplete = resolve;
-        tx.onerror = () => reject(tx.error || new Error('녹음 기록 정리 실패'));
-        tx.onabort = () => reject(tx.error || new Error('녹음 기록 정리 중단'));
+      const ref=doc(db,'phonics150Users',currentUid);
+      await runTransaction(db,async tx=>{
+        const snap=await tx.get(ref); const cloud=snap.exists()?snap.data():{};
+        const data={...(cloud.profileData||{})}; const target={...(data[selected.id]||before)};
+        for(const k of STUDY_RESET_KEYS) target[k]='{}';
+        target['phonics150SeqStart']=next['phonics150SeqStart']; target[REVIEW_RESET_KEY]=next[REVIEW_RESET_KEY];
+        data[selected.id]=target;
+        tx.set(ref,{profiles:cloud.profiles||profiles,activeProfileId:cloud.activeProfileId||selected.id,profileData:data,updatedAt:serverTimestamp()});
+        Object.assign(next,target);
       });
-      db.close();
-    } catch (audioCleanupError) { console.warn('초기화 중 녹음 파일 정리 실패', audioCleanupError); }
-
-    $login('startDate').value = iso(today);
-    window.phonicsResetStudyView();
-    await persistProfileState();
-    lastCloudData = readLocalSnapshot();
-    if (typeof window.ilbbangRenderAfterCloudSync === 'function') window.ilbbangRenderAfterCloudSync();
-    $login('resetStudyStatus').textContent = `'${selected.name}' 프로필의 학습·말하기·복습 기록을 초기화하고 DAY 1일차로 되돌렸어요. 별과 보상 기록은 유지됩니다.`;
-    status(`☁️ ${selected.name} 프로필의 학습 기록 초기화 및 동기화 완료`);
-  } catch (err) {
-    applySnapshot(before);
-    $login('resetStudyStatus').textContent = '초기화 저장에 실패했어요. 기존 기록을 복구했습니다: ' + (err.message || err);
-  }
+      profileData[selected.id]=next; lastCloudData=next;
+      applySnapshot(next); window.phonicsResetStudyView();
+      out.textContent=`${selected.name} 프로필 초기화 완료 · 1강으로 돌아갔어요.`;
+      status('☁️ 학습 기록 초기화 및 동기화 완료');
+      window.scrollTo(0,0);
+    } catch(err){out.textContent='초기화 처리 오류: '+(err.message||err);}
+    finally {suppressSync=false; switchingProfile=false;}
+  };
 };
 
 async function confirmRewardReset(kind, statusId) {
@@ -1908,6 +1874,8 @@ async function saveCloudSnapshot(reason = '자동') {
     await runTransaction(db, async transaction => {
       const snap = await transaction.get(ref);
       const cloud = snap.exists() ? snap.data() : {};
+      const remote=(cloud.profileData||{})[activeProfileId]||{};
+      if((remote[REVIEW_RESET_KEY]||'')>(localData[REVIEW_RESET_KEY]||'')){for(const k of [...STUDY_RESET_KEYS,'phonics150SeqStart',REVIEW_RESET_KEY]) localData[k]=remote[k]||'{}';}
       const allData = { ...(cloud.profileData || {}), [activeProfileId]: localData };
       // 일반 학습 기록 저장에서는 클라우드의 최신 프로필 목록을 보존합니다.
       // 오래 열린 다른 기기의 오래된 profiles 배열이 새 프로필을 덮어쓰지 않게 합니다.
