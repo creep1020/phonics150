@@ -197,6 +197,16 @@ function currentDay(){if(previewDay!==null)return previewDay;let diff=Math.floor
 function key(date,day){return date+'|'+day}
 function selectedDate(){return previewDay===null?iso(today):null}
 let listMode='all';
+window.phonicsResetStudyView = function(){
+ previewDay=null; listMode="all"; calendarDate=new Date(today.getFullYear(),today.getMonth(),1);
+ if(nativeVoicePending){const id=nativeVoicePending.requestId;nativeVoiceClear();try{window.IlbbangAndroid?.cancelRecording?.(id);}catch(e){}}
+ if(reviewRecognition){const rec=reviewRecognition;rec.onresult=rec.onerror=rec.onend=null;try{rec.abort();}catch(e){}}
+ reviewRecognition=null;reviewListening=false;reviewCurrentNo=null;reviewFallbackNo=null;reviewFallbackMode=null;reviewMode='scheduled';reviewPassedInSession=0;reviewSessionTotal=0;
+ Object.keys(reviewAttemptCounts).forEach(k=>delete reviewAttemptCounts[k]);
+ $('reviewFeedback').textContent='마이크 버튼을 누르고 영어를 소리 내어 읽어 주세요.';
+ $('startDate').value=iso(today);render();
+};
+
 function readMap(name){try{return JSON.parse(localStorage.getItem(name)||'{}')}catch(e){return {}}}
 function writeMap(name,obj){localStorage.setItem(name,JSON.stringify(obj))}
 const REVIEW_SCHEDULE_KEY='phonics150SeqReviewSchedule';
@@ -249,7 +259,7 @@ function rewardShopData(){
 function saveRewardShop(data){writeMap(REWARD_SHOP_KEY,data);if(window.ilbbangSaveSharedRewardShop)window.ilbbangSaveSharedRewardShop(data).catch(e=>console.warn('공통 보상 저장 대기:',e));renderRewards();renderParentRewardShop();}
 let sharedRewardShopActive=false;
 window.ilbbangGetLocalRewardShop=()=>{const shop=rewardShopData();shop.earned={...(shop.earned||{})};if(!shop.resetAt)for(const k of Object.keys(starAwards()))shop.earned['phonics150|'+k]=true;return shop;};
-window.ilbbangOnSharedRewardShop=(data)=>{if(!data)return;sharedRewardShopActive=true;const local=rewardShopData();const merged={...data,rewards:Array.isArray(data.rewards)?data.rewards:local.rewards,requests:{...(local.requests||{}),...(data.requests||{})},earned:{...(data.earned||{})}};const missingLocalAwards=!merged.resetAt&&Object.keys(starAwards()).some(k=>!merged.earned['phonics150|'+k]);if(!merged.resetAt)for(const k of Object.keys(starAwards()))merged.earned['phonics150|'+k]=true;const missingLocalRequests=Object.keys(local.requests||{}).some(id=>!data.requests?.[id]);writeMap(REWARD_SHOP_KEY,merged);if((missingLocalAwards||missingLocalRequests||!Array.isArray(data.rewards))&&window.ilbbangSaveSharedRewardShop)window.ilbbangSaveSharedRewardShop(merged).catch(e=>console.warn(e));renderRewards();renderParentRewardShop();};
+window.ilbbangOnSharedRewardShop=(data)=>{if(!data)return;sharedRewardShopActive=true;const local=rewardShopData();const merged={...data,rewards:Array.isArray(data.rewards)?data.rewards:local.rewards,requests:Number(data.resetAt||0)>Number(local.resetAt||0)?{...(data.requests||{})}:{...(local.requests||{}),...(data.requests||{})},earned:{...(data.earned||{})}};const missingLocalAwards=!merged.resetAt&&Object.keys(starAwards()).some(k=>!merged.earned['phonics150|'+k]);if(!merged.resetAt)for(const k of Object.keys(starAwards()))merged.earned['phonics150|'+k]=true;const missingLocalRequests=Number(data.resetAt||0)<=Number(local.resetAt||0)&&Object.keys(local.requests||{}).some(id=>!data.requests?.[id]);writeMap(REWARD_SHOP_KEY,merged);if((missingLocalAwards||missingLocalRequests||!Array.isArray(data.rewards))&&window.ilbbangSaveSharedRewardShop)window.ilbbangSaveSharedRewardShop(merged).catch(e=>console.warn(e));renderRewards();renderParentRewardShop();};
 function shopRequests(){return rewardShopData().requests||{}}
 function rewardStatusLabel(status){return ({pending:'부모님 확인 대기',approved:'승인 · 사용 가능',used:'사용 완료',rejected:'거절됨',cancelled:'취소됨'})[status]||'상태 확인 중'}
 function studyDates(){return [...new Set(Object.keys(readRecords()).filter(k=>readRecords()[k]===true).map(k=>k.split('|')[0]))].sort();}
@@ -1187,15 +1197,6 @@ $('sentenceList').addEventListener('click',e=>{
  daily[iso(today)]={added:[...new Set((todayState.added||[]).map(Number))],passed:[...new Set((todayState.passed||[]).map(Number))]};writeMap(DAILY_REVIEW_KEY,daily);
  writeMap('phonics150SeqReview',m);writeMap(REVIEW_SCHEDULE_KEY,schedule);render();
 });
-window.phonicsResetStudyView = function(){
- previewDay=null; calendarDate=new Date(today.getFullYear(),today.getMonth(),1);
- if(nativeVoicePending){const id=nativeVoicePending.requestId;nativeVoiceClear();try{window.IlbbangAndroid?.cancelRecording?.(id);}catch(e){}}
- if(reviewRecognition){const rec=reviewRecognition;rec.onresult=rec.onerror=rec.onend=null;try{rec.abort();}catch(e){}}
- reviewRecognition=null;reviewListening=false;reviewCurrentNo=null;reviewFallbackNo=null;reviewFallbackMode=null;reviewMode='scheduled';reviewPassedInSession=0;reviewSessionTotal=0;
- Object.keys(reviewAttemptCounts).forEach(k=>delete reviewAttemptCounts[k]);
- $('reviewFeedback').textContent='마이크 버튼을 누르고 영어를 소리 내어 읽어 주세요.';
- $('startDate').value=iso(today);render();
-};
 window.ilbbangRenderAfterCloudSync = render;
 // 문장 목록은 녹음 파일 복원과 관계없이 앱 진입 즉시 표시합니다.
 render();
@@ -1306,6 +1307,7 @@ async function registerPushDevice() {
   }
 }
 const CLOUD_KEYS = [
+ 'phonicsStarResetAt','phonicsGrowthResetAt',
   'phonics150SeqRecords', 'phonics150SeqStart', 'phonics150SeqChecked',
   'phonics150SeqReview', REVIEW_SCHEDULE_KEY, DAILY_REVIEW_KEY, REVIEW_RESET_KEY, 'phonics150VoiceRate',
   'phonics150SeqStarAwards', 'phonics150SeqRewardRequests', 'ilbbangRewardShopData', 'ilbbangKekeGrowthDays', 'ilbbangMinseoFootballChoice',
@@ -1658,6 +1660,7 @@ function mergeSnapshots(cloudData, localData) {
   }
   const cloudReset=cloudData?.[REVIEW_RESET_KEY]||'', localReset=localData?.[REVIEW_RESET_KEY]||'';
   if(cloudReset!==localReset){const fresh=cloudReset>localReset?cloudData:localData; for(const k of STUDY_RESET_KEYS) merged[k]=fresh?.[k]||'{}'; merged['phonics150SeqStart']=fresh?.['phonics150SeqStart']||iso(today);}
+  for(const [stamp,keys] of [['phonicsStarResetAt',[REWARD_KEY,REDEEM_KEY,REWARD_SHOP_KEY]],['phonicsGrowthResetAt',[KEKE_PROGRESS_KEY]]]){const c=cloudData?.[stamp]||'',l=localData?.[stamp]||'';if(c!==l){const fresh=c>l?cloudData:localData;merged[stamp]=fresh[stamp];for(const k of keys)merged[k]=fresh[k]||'{}';}}
   return merged;
 }
 function applySnapshot(data) {
@@ -1790,7 +1793,7 @@ $login('resetStudyRecords').onclick = async () => {
         Object.assign(next,target);
       });
       profileData[selected.id]=next; lastCloudData=next;
-      applySnapshot(next); window.phonicsResetStudyView();
+      applySnapshot(next); if(typeof window.phonicsResetStudyView === "function") window.phonicsResetStudyView(); else { previewDay=null; listMode="all"; render(); }
       out.textContent=`${selected.name} 프로필 초기화 완료 · 1강으로 돌아갔어요.`;
       status('☁️ 학습 기록 초기화 및 동기화 완료');
       window.scrollTo(0,0);
@@ -1800,40 +1803,31 @@ $login('resetStudyRecords').onclick = async () => {
 };
 
 async function confirmRewardReset(kind, statusId) {
-  const output = $login(statusId);
-  if (!parentSettingsUnlocked || !syncReady || !currentUid) {
-    output.textContent = '부모 PIN 잠금 해제와 클라우드 로그인이 필요합니다.';
-    return;
-  }
-  const selected = profiles.find(p => p.id === activeProfileId);
-  if (!selected) return;
-  const isStars = kind === 'stars';
-  const title = isStars ? '별 포인트' : '뭉이 성장';
-  if (!confirm(`현재 선택된 '${selected.name}' 프로필의 ${title}을 초기화할까요?\n\n${isStars ? '별 잔액을 0개로 만들고 사용 완료 내역을 정리합니다. 뭉이와 학습 기록은 유지됩니다.' : '뭉이를 아기 뭉이로 되돌립니다. 별 포인트와 학습 기록은 유지됩니다.'}`)) return;
-  const phrase = prompt(`마지막 확인입니다.\n\n초기화할 프로필: ${selected.name}\n\n계속하려면 프로필 이름을 똑같이 입력해 주세요.`);
-  if (phrase !== selected.name) { output.textContent = '프로필 이름이 일치하지 않아 초기화를 취소했어요.'; return; }
-  const before = readLocalSnapshot();
-  try {
-    if (isStars) {
-      writeMap(REWARD_KEY, {});
-      const requests = redeemedRequests();
-      const pending = Object.fromEntries(Object.entries(requests).filter(([, item]) => item && item.status === 'pending'));
-      const shop = rewardShopData(); shop.requests = pending; shop.earned = {}; shop.resetAt = Date.now(); saveRewardShop(shop);
-      writeMap(REDEEM_KEY, {});
-      output.textContent = '별 포인트를 0개로 초기화했어요. 보상 항목과 뭉이·학습 기록은 그대로예요.';
-    } else {
-      writeMap(KEKE_PROGRESS_KEY, {});
-      output.textContent = '뭉이를 1일 차 아기 모습으로 초기화했어요. 다음 새 학습 완료부터 다시 성장해요.';
-    }
-    renderRewards();
-    await persistProfileState();
-    lastCloudData = readLocalSnapshot();
-    status(`☁️ ${selected.name} 프로필의 ${title} 초기화 및 동기화 완료`);
-  } catch (err) {
-    applySnapshot(before);
-    renderRewards();
-    output.textContent = '초기화 저장에 실패했어요. 기존 데이터를 복구했습니다: ' + (err.message || err);
-  }
+ const output=$login(statusId), selected=profiles.find(p=>p.id===activeProfileId);
+ if(!parentSettingsUnlocked||!syncReady||!currentUid||!selected){output.textContent='부모 PIN 잠금 해제와 로그인이 필요합니다.';return;}
+ const stars=kind==='stars', title=stars?'별 포인트':'캐릭터 성장', linked=sharedAppLinks[sharedProfileLinkKey(selected.id)];
+ const info=document.createElement('p'), input=document.createElement('input'), yes=document.createElement('button'), no=document.createElement('button');
+ info.textContent=selected.name+'의 '+title+'만 초기화합니다. '+(stars&&linked?'공통 별 지갑에 연결되어 있어 다른 연결 앱의 별도 초기화됩니다. ':'')+'프로필 이름을 입력하세요.';
+ input.placeholder='프로필 이름'; yes.textContent='초기화 확정'; no.textContent='취소'; yes.type=no.type='button'; output.replaceChildren(info,input,yes,no);
+ no.onclick=()=>{output.textContent='취소했어요.';};
+ yes.onclick=async()=>{
+ if(input.value.trim()!==selected.name||activeProfileId!==selected.id||!parentSettingsUnlocked){info.textContent='프로필 이름과 부모 잠금을 확인하세요.';return;}
+ yes.disabled=no.disabled=true; clearTimeout(saveTimer); switchingProfile=true; suppressSync=true;
+ const before=readLocalSnapshot(), uid=currentUid, ref=doc(db,'phonics150Users',uid), sharedRef=doc(db,'ilbbangShared',uid), stamp=new Date().toISOString();
+ try {
+ const next=await runTransaction(db,async tx=>{
+ const snap=await tx.get(ref), ss=stars&&linked?await tx.get(sharedRef):null, cloud=snap.exists()?snap.data():{}, all={...(cloud.profileData||{})}, target={...(all[selected.id]||before)};
+ if(stars){
+ let shop=parseObject(target[REWARD_SHOP_KEY]);
+ if(ss){const sd=ss.data()||{}, wallets={...(sd.rewardShop||{})}; if(sd.appLinks?.[sharedProfileLinkKey(selected.id)]!==linked)throw new Error('공통 프로필 연결이 변경됐어요.'); shop={...shop,...(wallets[linked]||{})}; shop.requests=Object.fromEntries(Object.entries(shop.requests||{}).filter(([,v])=>v?.status==='pending')); shop.earned={};shop.resetAt=Date.now(); wallets[linked]=shop; tx.set(sharedRef,{...sd,rewardShop:wallets,updatedAt:serverTimestamp()});}
+ else {shop.requests=Object.fromEntries(Object.entries(shop.requests||{}).filter(([,v])=>v?.status==='pending'));shop.earned={};shop.resetAt=Date.now();}
+ target[REWARD_KEY]='{}';target[REDEEM_KEY]='{}';target[REWARD_SHOP_KEY]=JSON.stringify(shop);target.phonicsStarResetAt=stamp;
+ }else{target[KEKE_PROGRESS_KEY]='{}';target.phonicsGrowthResetAt=stamp;}
+ all[selected.id]=target;tx.set(ref,{...cloud,profiles:cloud.profiles||profiles,activeProfileId:cloud.activeProfileId||selected.id,profileData:all,updatedAt:serverTimestamp()});return target;
+ });
+ profileData[selected.id]=next;lastCloudData=next; kekePreviewStage=null;applySnapshot(next);renderRewards();renderParentRewardShop();output.textContent=selected.name+'의 '+title+' 초기화 완료';
+ }catch(err){output.textContent='초기화 오류: '+(err.message||err);}finally{suppressSync=false;switchingProfile=false;}
+ };
 }
 $login('resetStarPoints').onclick = () => confirmRewardReset('stars', 'resetStarStatus');
 $login('resetKekeGrowth').onclick = () => confirmRewardReset('keke', 'resetKekeStatus');
@@ -1876,6 +1870,7 @@ async function saveCloudSnapshot(reason = '자동') {
       const cloud = snap.exists() ? snap.data() : {};
       const remote=(cloud.profileData||{})[activeProfileId]||{};
       if((remote[REVIEW_RESET_KEY]||'')>(localData[REVIEW_RESET_KEY]||'')){for(const k of [...STUDY_RESET_KEYS,'phonics150SeqStart',REVIEW_RESET_KEY]) localData[k]=remote[k]||'{}';}
+      for(const [stamp,keys] of [['phonicsStarResetAt',[REWARD_KEY,REDEEM_KEY,REWARD_SHOP_KEY]],['phonicsGrowthResetAt',[KEKE_PROGRESS_KEY]]]){if((remote[stamp]||'')>(localData[stamp]||'')){localData[stamp]=remote[stamp];for(const k of keys)localData[k]=remote[k]||'{}';}}
       const allData = { ...(cloud.profileData || {}), [activeProfileId]: localData };
       // 일반 학습 기록 저장에서는 클라우드의 최신 프로필 목록을 보존합니다.
       // 오래 열린 다른 기기의 오래된 profiles 배열이 새 프로필을 덮어쓰지 않게 합니다.
