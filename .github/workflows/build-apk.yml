@@ -45,7 +45,7 @@ jobs:
           android {
             namespace 'com.creep1020.phonics150'
             compileSdk 35
-            defaultConfig { applicationId 'com.creep1020.phonics150.nativevoice'; minSdk 31; targetSdk 35; versionCode 10; versionName '1.10-test' }
+            defaultConfig { applicationId 'com.creep1020.phonics150.nativevoice'; minSdk 31; targetSdk 35; versionCode 15; versionName '1.15-fix5' }
             compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
             
           }
@@ -119,7 +119,7 @@ jobs:
                     val language = tts?.setLanguage(Locale.US) ?: TextToSpeech.LANG_NOT_SUPPORTED
                     englishReady = language >= TextToSpeech.LANG_AVAILABLE
                     if (!englishReady) englishReady = (tts?.setLanguage(Locale.ENGLISH) ?: -2) >= 0
-                    Toast.makeText(this, "v10 TTS: $language / $englishReady", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "파닉스 fix5 · TTS: $language / $englishReady", Toast.LENGTH_LONG).show()
                   }
                 }
               }
@@ -144,8 +144,9 @@ jobs:
               }
               web.addJavascriptInterface(Bridge(), "IlbbangAndroid")
               web.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+              ServiceWorkerController.getInstance().serviceWorkerWebSettings.cacheMode = WebSettings.LOAD_NO_CACHE
               web.clearCache(true)
-              web.loadUrl(url + "?native=12&rev=1128fix4")
+              web.loadUrl(url + "?native=15&rev=1128fix5")
             }
             private fun status(id: String, s: String) { web.evaluateJavascript("window.onIlbbangNativeVoiceStatus?.(${JSONObject.quote(id)},${JSONObject.quote(s)})", null) }
             private fun result(id: String, text: String, error: String, audio: String = "") {
@@ -157,6 +158,7 @@ jobs:
               web.evaluateJavascript("window.onIlbbangNativeVoiceResult?.($obj)", null)
             }
             inner class Bridge {
+              @JavascriptInterface fun appRevision(): String = "fix5 / 15"
               @JavascriptInterface fun canSpeakEnglish(): Boolean = true
               @JavascriptInterface fun speak(text: String, rate: Float) { runOnUiThread {
                 stopLesson()
@@ -375,5 +377,5 @@ jobs:
         run: gradle assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: PHONICS150-fix4
+          name: PHONICS150-fix5
           path: app/build/outputs/apk/debug/app-debug.apk
