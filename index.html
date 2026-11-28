@@ -112,7 +112,7 @@ if ('serviceWorker' in navigator) {
  <div id="reviewGateProgress" style="margin-top:10px"><span id="reviewGateProgressBar"></span></div>
  <div class="review-question" id="reviewGateKorean"></div>
  <div class="small" id="reviewGateNumber" style="text-align:center"></div>
- <button id="reviewMicBtn" type="button">🎙️ 소리 내어 읽기</button>
+ <button id="reviewListenBtn" type="button" style="width:100%;margin:8px 0">🔊 듣기</button><button id="reviewMicBtn" type="button">🎙️ 소리 내어 읽기</button>
  <div id="reviewFeedback" style="margin-top:10px" aria-live="polite">마이크 버튼을 누르고 영어 문장을 말해 주세요.</div>
  <div id="reviewAnswer" style="display:none;margin-top:12px;padding:16px;background:#edf3eb;border:1px solid #cbd9c8;border-radius:12px;text-align:center;font-size:24px;font-weight:850;color:#31543a"></div>
  <button id="reviewRevealBtn" type="button" class="primary" style="display:none;width:100%;margin-top:10px;min-height:50px">다음 읽기 항목 →</button>
@@ -120,9 +120,9 @@ if ('serviceWorker' in navigator) {
 </section>
 <div class="toggle" id="studyViewToggle"><button id="koreanBtn" class="active">한국어 보기</button><button id="englishBtn">영어 보기</button><button id="bothBtn">함께 보기</button></div>
 <section class="panel" id="voiceSettingsPanel"><strong style="font-size:14px">🔊 음성 설정</strong><div style="margin-top:10px"><label for="voiceRate">말하기 속도 <span id="rateLabel">0.85배</span></label><input id="voiceRate" type="range" min="0.75" max="1.05" step="0.05" value="0.85" style="width:100%"></div></section>
-<section class="panel" id="sentenceStudyPanel"><div class="filterbar"><button id="showAll" class="active">오늘 읽기 27개</button><button id="showReview">복습할 단어</button><span class="item-count" id="itemCount"></span></div><section class="panel" id="phonicsLessonIntro" aria-live="polite"><h2 id="phonicsLessonTitle"></h2><div id="phonicsLessonStory"></div><div class="small" id="phonicsLessonCore"></div><p class="small">읽기 카드 24개 + 새로운 읽기 도전 3개 · 듣고 따라 읽고 직접 녹음해 보세요.</p></section><ol class="list" id="sentenceList"></ol><div class="small" id="emptyReview" style="display:none;padding:18px 0">복습할 단어이 아직 없어요. 헷갈리는 문장에서 ‘복습’ 버튼을 눌러 추가하세요.</div></section>
+<section class="panel" id="sentenceStudyPanel"><div class="filterbar"><button id="showAll" class="active">오늘 읽기 27개</button><button id="showReview">복습할 단어</button><span class="item-count" id="itemCount"></span></div><section class="panel" id="phonicsLessonIntro" aria-live="polite"><h2 id="phonicsLessonTitle"></h2><div style="display:flex;gap:8px;margin:12px 0"><button id="readIntro" type="button">🔊 본문 읽어주기 · 0.75배</button><button id="stopIntro" type="button">⏹ 정지</button></div><div id="introStatus" class="small" aria-live="polite"></div><div id="phonicsLessonStory"></div><div class="small" id="phonicsLessonCore"></div><p class="small">읽기 카드 24개 + 새로운 읽기 도전 3개 · 듣고 따라 읽고 직접 녹음해 보세요.</p></section><ol class="list" id="sentenceList"></ol><div class="small" id="emptyReview" style="display:none;padding:18px 0">복습할 단어이 아직 없어요. 헷갈리는 문장에서 ‘복습’ 버튼을 눌러 추가하세요.</div></section>
 <section class="panel" id="studyActionsPanel">
-<div class="actions"><button class="primary" id="markDone">✓ 오늘 학습 완료</button><button id="undoDone">완료 취소</button></div>
+<div class="actions"><button class="primary" id="markDone">✓ 이 강의 학습 완료</button><button id="undoDone">완료 취소</button></div>
 <div class="status" id="studyStatus">학습을 마친 뒤 완료 버튼을 눌러 기록하세요.</div><div id="bonusGameWrap" style="display:none;margin-top:10px"><button class="primary" id="bonusGameBtn" style="width:100%">🎁 보너스 미니게임 1분 도전하기</button><div class="small" id="bonusGameHint" style="text-align:center;margin-top:5px">오늘의 파닉스 읽기 학습을 완료하면 1분 보너스 게임이 열려요.</div></div>
 </section>
 <section class="panel" id="rewardPanel">
@@ -167,7 +167,7 @@ if ('serviceWorker' in navigator) {
 </section>
 <section class="panel calendar">
 <div class="calendar-head"><button id="prevMonth">‹</button><strong id="monthTitle">학습 기록</strong><button id="nextMonth">›</button></div>
-<div class="calendar-grid" id="calendar"></div>
+<div class="calendar-grid" id="calendar"></div><div id="lessonHistory" style="margin-top:12px"></div>
 </section>
 <p class="small foot">학습 기록은 이 기기의 브라우저에 저장됩니다. 백업 파일로 다른 기기에 옮길 수 있습니다. 말하기 복습은 안드로이드 크롬의 마이크와 영어 음성 인식이 필요합니다. 녹음 파일은 현재 화면에서 재생할 수 있고 새로고침하면 사라집니다.</p>
 </main>
@@ -193,7 +193,9 @@ const iso=d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.ge
 let previewDay=null,viewMode='ko',calendarDate=new Date(today.getFullYear(),today.getMonth(),1);
 function readRecords(){try{return JSON.parse(localStorage.getItem('phonics150SeqRecords')||'{}')}catch(e){return {}}}
 function startDate(){let v=$('startDate').value||localStorage.getItem('phonics150SeqStart')||iso(today);return new Date(v+'T00:00:00')}
-function currentDay(){if(previewDay!==null)return previewDay;let diff=Math.floor((today-startDate())/86400000)+1;return Math.max(1,Math.min(150,diff))}
+function completedLessonDates(day,records=readRecords()){return Object.keys(records).filter(k=>records[k]&&Number(k.split('|')[1])===Number(day)).map(k=>k.split('|')[0]);}
+function currentDay(){if(previewDay!==null)return previewDay;const r=readRecords();for(let d=1;d<=150;d++)if(!completedLessonDates(d,r).length)return d;return 150;}
+function readingAttempted(x){const k=speakingKey(x.no);return !!speakingPasses()[k]?.passed||Number(speakingAttempts()[k]||0)>=1;}
 function key(date,day){return date+'|'+day}
 function selectedDate(){return previewDay===null?iso(today):null}
 let listMode='all';
@@ -754,6 +756,7 @@ window.onIlbbangNativeVoiceResult=async function(result){
 };
 
 async function startRecording(no){
+ stopEnglishSpeech();
  const attemptKey=speakingKey(no),attemptCount=Number(speakingAttempts()[attemptKey]||0);
  if(attemptCount>=1&&!speakingPasses()[attemptKey]?.passed){alert('이 문장은 1회 도전을 마쳤어요. 오늘 복습 목록에서 다시 연습해 주세요.');return;}
  if(window.IlbbangAndroid&&typeof window.IlbbangAndroid.startRecording==='function'){
@@ -856,11 +859,11 @@ function finishRecording(){
 function render(){
  ensureReviewSchedules();
  const due=dueReviewItems();
- const day=currentDay(),data=DATA[day-1],records=readRecords(),done=!!records[key(iso(today),day)];
+ const day=currentDay(),data=DATA[day-1],records=readRecords(),done=completedLessonDates(day,records).length>0;
  const checked=readMap('phonics150SeqChecked'),review=readMap('phonics150SeqReview'),speaking=speakingPasses();
  const allSentencesDone=data.items.every(x=>!!checked[x.no]);
- const allSpeakingPassed=data.items.every(x=>!!speaking[speakingKey(x.no)]?.passed);
- const dailyPending=previewDay===null&&allSentencesDone?todayDailyReviewItems():[];
+ const allSpeakingPassed=data.items.every(readingAttempted);
+ const dailyPending=allSentencesDone&&allSpeakingPassed&&!done?todayDailyReviewItems():[];
  const reviewModeNow=due.length?'scheduled':dailyPending.length?'daily':null;
  const reviewItems=due.length?due:dailyPending;
  const reviewLocked=!!reviewModeNow;
@@ -868,7 +871,7 @@ function render(){
  $('phonicsLessonStory').innerHTML=data.intro.map(p=>`<p style="line-height:1.7">${escapeHtml(p)}</p>`).join('');
  $('phonicsLessonCore').textContent='오늘의 핵심 소리: '+data.core;
  $('dayBadge').textContent=`강의 ${day} / 150`;
- $('dateLabel').textContent=previewDay===null?today.toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'}):`DAY ${day} 미리보기`;
+ $('dateLabel').textContent=previewDay===null?today.toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'}):`DAY ${day} 학습`;
  $('daySelect').value=String(day);
  $('prevDay').disabled=day===1||reviewLocked;$('nextDay').disabled=day===150||reviewLocked;
  $('startDate').disabled=reviewLocked;$('apply').disabled=reviewLocked;$('today').disabled=reviewLocked;$('daySelect').disabled=reviewLocked;
@@ -926,16 +929,16 @@ function render(){
  $('sentenceStudyPanel').style.display=reviewLocked?'none':'block';
  $('studyActionsPanel').style.display=reviewLocked?'none':'block';
  if(reviewLocked){reviewMode=reviewModeNow;renderReviewGate(reviewItems,reviewModeNow);}
- $('markDone').disabled=previewDay!==null||done||!allSentencesDone||!allSpeakingPassed||reviewLocked;
- $('markDone').textContent=done?'✓ 오늘 학습 완료했어요':!allSentencesDone?'읽기 항목을 모두 완료해 주세요':!allSpeakingPassed?'읽기 연습을 완료해 주세요':'✓ 오늘 학습 완료';
- $('undoDone').disabled=previewDay!==null||!done;
+ $('markDone').disabled=done||!allSentencesDone||!allSpeakingPassed||reviewLocked;
+ $('markDone').textContent=done?'✓ 이 강의 학습 완료했어요':!allSentencesDone?'읽기 항목을 모두 완료해 주세요':!allSpeakingPassed?'읽기 연습을 완료해 주세요':'✓ 이 강의 학습 완료';
+ $('undoDone').disabled=!completedLessonDates(day,records).includes(iso(today));
  $('bonusGameWrap').style.display='block';
- $('bonusGameBtn').disabled=previewDay!==null||!done;
+ $('bonusGameBtn').disabled=!done;
  $('bonusGameBtn').textContent=done?'🎁 보너스 미니게임 1분 도전하기':'🔒 오늘 학습 완료 후 보너스 게임 열기';
  $('bonusGameHint').textContent=done?'오늘 학습을 완료했어요! 1분 보너스 게임을 할 수 있어요.':'오늘의 파닉스 읽기 학습을 완료하면 1분 보너스 게임이 열려요.';
  $('studyStatus').textContent=reviewModeNow==='scheduled'?`오늘 복습할 단어 ${due.length}개를 먼저 통과해야 새 학습을 시작할 수 있어요.`:reviewModeNow==='daily'?`오늘 추가한 복습 문장 ${dailyPending.length}개를 순서대로 통과하면 오늘 학습을 완료할 수 있어요.`:done?'오늘 학습 완료 기록이 저장되어 있어요. 달력에서 확인할 수 있습니다.':allSentencesDone&&!allSpeakingPassed?`문장 학습은 체크했어요. 녹음 통과 ${data.items.filter(x=>speaking[speakingKey(x.no)]?.passed).length}/${data.items.length}개가 필요해요.`:allSentencesDone?'모든 문장을 학습하고 녹음도 통과했어요! 이제 오늘 학습 완료를 누를 수 있어요.':`읽기 항목별 학습 완료를 먼저 체크해 주세요. (${todayChecked}/${data.items.length})`;
  renderCalendar();
- if(previewDay===null&&readRecords()[key(iso(today),currentDay())])awardToday();
+ if(readRecords()[key(iso(today),currentDay())])awardToday();
  renderRewards();
 }
 function renderReviewGate(items,mode='scheduled'){
@@ -948,6 +951,7 @@ function renderReviewGate(items,mode='scheduled'){
  $('reviewGateHint').textContent=mode==='daily'?'오늘 추가한 영어 단어와 문장을 소리 내어 읽어 보세요. 모두 통과해야 오늘 학습이 완료돼요.':'영어 단어와 문장을 보고 소리 내어 읽으세요. 일치하면 자동으로 통과합니다.';
  $('reviewGateProgressBar').style.width=(reviewPassedInSession/Math.max(reviewSessionTotal,reviewPassedInSession+items.length)*100)+'%';
  $('reviewGateKorean').textContent=item.en;
+ $('reviewListenBtn').disabled=reviewListening; $('reviewListenBtn').onclick=()=>{if(!reviewListening&&!nativeVoicePending)speakEnglish(item.en);};
  $('reviewGateNumber').textContent=`문장 ${item.no}번 · ${index+1} / ${items.length}`;
  $('reviewMicBtn').style.display=showingAnswer?'none':'block';
  const nativeReviewActive=nativeVoicePending?.mode==='review';
@@ -985,7 +989,7 @@ function completeReviewItem(item,mode,usedAnswer=false,matchPercent=100){
  reviewListening=false;reviewRecognition=null;
  reviewAttemptCounts[item.no]=0;reviewFallbackNo=null;reviewFallbackMode=null;
  // 오늘 학습 문장을 복습에서 마무리하면 말하기 통과 조건도 함께 충족합니다.
- if(previewDay===null&&DATA[currentDay()-1]?.items.some(x=>x.no===item.no)){
+ if(DATA[currentDay()-1]?.items.some(x=>x.no===item.no)){
   const passed=speakingPasses(),k=speakingKey(item.no);
   passed[k]={passed:true,percent:matchPercent,transcript:usedAnswer?'복습 정답 확인':'복습 말하기 통과',at:new Date().toISOString()};
   writeMap(SPEAKING_PASS_KEY,passed);
@@ -1074,8 +1078,12 @@ function renderCalendar(){
  $('monthTitle').textContent=`${y}년 ${m+1}월 학습 기록`;
  let out=['일','월','화','수','목','금','토'].map(d=>`<div class="dow">${d}</div>`).join('');
  for(let i=0;i<first;i++)out+='<div></div>';
- for(let d=1;d<=last;d++){let dt=new Date(y,m,d),ds=iso(dt),done=Object.keys(r).some(k=>k.startsWith(ds+'|')&&r[k]),isToday=ds===iso(today);out+=`<div class="calday ${done?'done':''} ${isToday?'today':''}"><span>${d}</span><span>${done?'✓':''}</span></div>`;}
+ for(let d=1;d<=last;d++){let dt=new Date(y,m,d),ds=iso(dt),days=Object.keys(r).filter(k=>k.startsWith(ds+'|')&&r[k]).map(k=>Number(k.split('|')[1])).filter(n=>Number.isInteger(n)&&n>=1&&n<=150).sort((a,b)=>a-b),count=days.length,done=count>0,isToday=ds===iso(today);out+=`<div class="calday ${done?'done':''} ${isToday?'today':''}"><span>${d}</span><span>${done?count+'강':''}</span>${days.map(n=>`<span style="font-size:10px">DAY ${n}</span>`).join('')}</div>`;}
  $('calendar').innerHTML=out;
+ const grouped={};for(const [k,v] of Object.entries(r)){if(!v)continue;const [date,n]=k.split('|');const day=Number(n);if(!date||!Number.isInteger(day)||day<1||day>150)continue;(grouped[date]??=new Set()).add(day);}
+ const total=new Set(Object.values(grouped).flatMap(x=>[...x])).size;
+ const month=`${y}-${String(m+1).padStart(2,'0')}`;
+ $('lessonHistory').innerHTML=`<div class="status">오늘 ${grouped[iso(today)]?.size||0}강 완료 · 누적 ${total}/150강</div>`+Object.keys(grouped).filter(d=>d.startsWith(month)).sort().reverse().map(d=>`<div style="padding:9px 0;border-bottom:1px solid #ddd"><b>${escapeHtml(d)} · ${grouped[d].size}강 완료</b><div class="small">${[...grouped[d]].sort((a,b)=>a-b).map(n=>'DAY '+n).join(' · ')}</div></div>`).join('');
 }
 for(let d=1;d<=150;d++){let o=document.createElement('option');o.value=d;o.textContent=`DAY ${d}`;$('daySelect').appendChild(o);}
 $('startDate').value=localStorage.getItem('phonics150SeqStart')||iso(today);
@@ -1087,13 +1095,25 @@ $('daySelect').onchange=()=>{previewDay=Number($('daySelect').value);render()};
 $('koreanBtn').onclick=()=>{viewMode='ko';render()};
 $('englishBtn').onclick=()=>{viewMode='en';render()};
 $('bothBtn').onclick=()=>{viewMode='both';render()};
-$('markDone').onclick=()=>{if(previewDay!==null)return;if(dueReviewItems().length||todayDailyReviewItems().length){alert('오늘 복습할 단어을 먼저 모두 통과해 주세요.');render();return;}const items=DATA[currentDay()-1].items;const checked=readMap('phonics150SeqChecked'),speaking=speakingPasses();if(!items.every(x=>!!checked[x.no])){alert('오늘의 문장 학습을 모두 체크한 뒤 완료할 수 있어요.');render();return;}if(!items.every(x=>!!speaking[speakingKey(x.no)]?.passed)){alert('오늘의 모든 문장을 녹음하고 일치율 50% 이상을 통과해야 완료할 수 있어요.');render();return;}let r=readRecords();r[key(iso(today),currentDay())]=true;localStorage.setItem('phonics150SeqRecords',JSON.stringify(r));awardToday(true);render()};
-$('undoDone').onclick=()=>{if(previewDay!==null)return;let r=readRecords();delete r[key(iso(today),currentDay())];localStorage.setItem('phonics150SeqRecords',JSON.stringify(r));render()};
+$('markDone').onclick=()=>{const day=currentDay(),items=DATA[day-1].items,r=readRecords();if(completedLessonDates(day,r).length)return;if(dueReviewItems().length||todayDailyReviewItems().length){render();return;}const checked=readMap('phonics150SeqChecked');if(!items.every(x=>!!checked[x.no])||!items.every(readingAttempted)){render();return;}previewDay=day;r[key(iso(today),day)]=true;localStorage.setItem('phonics150SeqRecords',JSON.stringify(r));awardToday(true);render();};
+$('undoDone').onclick=()=>{const day=currentDay(),r=readRecords();previewDay=day;delete r[key(iso(today),day)];localStorage.setItem('phonics150SeqRecords',JSON.stringify(r));render();};
 $('prevMonth').onclick=()=>{calendarDate=new Date(calendarDate.getFullYear(),calendarDate.getMonth()-1,1);renderCalendar()};
 $('nextMonth').onclick=()=>{calendarDate=new Date(calendarDate.getFullYear(),calendarDate.getMonth()+1,1);renderCalendar()};
 $('showAll').onclick=()=>{listMode='all';render()};
 $('showReview').onclick=()=>{listMode='review';render()};
-$('reviewMicBtn').onclick=startReviewSpeaking;
+$('reviewMicBtn').onclick=()=>{if(!reviewListening)stopEnglishSpeech();startReviewSpeaking();};
+$('stopIntro').onclick=()=>{stopEnglishSpeech();$('introStatus').textContent='재생을 정지했어요.';};
+$('readIntro').onclick=()=>{
+ if(nativeVoicePending||activeNo!==null||reviewListening)return;
+ stopEnglishSpeech();
+ const data=DATA[currentDay()-1];
+ const parts=[data.title,...data.intro,'오늘의 핵심 소리: '+data.core].flatMap(p=>String(p).split(/([A-Za-z]+(?:[’'\-][A-Za-z]+)*(?:[ ,·]+[A-Za-z]+(?:[’'\-][A-Za-z]+)*)*)/g).filter(t=>t.trim()).map(t=>({text:t,lang:/[A-Za-z]/.test(t)?'en-US':'ko-KR'})));
+ if(typeof window.IlbbangAndroid?.speakLesson==='function'){window.IlbbangAndroid.speakLesson(JSON.stringify(parts));$('introStatus').textContent='본문 읽기 · 0.75배';return;}
+ if(window.IlbbangAndroid){$('introStatus').textContent='본문 읽기는 새 APK 설치 후 사용할 수 있어요.';return;}
+ if(!window.speechSynthesis){$('introStatus').textContent='이 기기는 본문 음성을 지원하지 않아요.';return;}
+ for(const part of parts){const u=new SpeechSynthesisUtterance(part.text);u.lang=part.lang;u.rate=0.75;window.speechSynthesis.speak(u);}
+ $('introStatus').textContent='본문 읽기 · 0.75배';
+};
 $('sentenceList').addEventListener('change',e=>{
  const no=e.target.getAttribute('data-check');if(!no)return;
  let m=readMap('phonics150SeqChecked');if(e.target.checked)m[no]=true;else delete m[no];writeMap('phonics150SeqChecked',m);render();

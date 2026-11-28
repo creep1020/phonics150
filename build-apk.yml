@@ -1,0 +1,324 @@
+name: Build PHONICS 150 native voice APK
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Create native app
+        run: |
+          mkdir -p app/src/main/java/com/creep1020/phonics150 app/src/main/res/drawable
+          cp icon-512.png app/src/main/res/drawable/app_icon.png
+          cat > settings.gradle <<'GRADLE'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = 'Phonics150'
+          include ':app'
+          GRADLE
+          cat > gradle.properties <<'GRADLE'
+          android.builtInKotlin=false
+          android.newDsl=false
+          android.useAndroidX=true
+          org.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8
+          GRADLE
+          cat > build.gradle <<'GRADLE'
+          plugins {
+            id 'com.android.application' version '9.1.1' apply false
+            id 'org.jetbrains.kotlin.android' version '2.4.0' apply false
+          }
+          GRADLE
+          cat > app/build.gradle <<'GRADLE'
+          plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
+          android {
+            namespace 'com.creep1020.phonics150'
+            compileSdk 35
+            defaultConfig { applicationId 'com.creep1020.phonics150.nativevoice'; minSdk 31; targetSdk 35; versionCode 10; versionName '1.10-test' }
+            compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+            
+          }
+          kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
+          dependencies {
+            implementation 'com.google.mlkit:genai-speech-recognition:1.0.0-alpha2'
+            implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+          }
+          GRADLE
+          cat > app/src/main/AndroidManifest.xml <<'XML'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+            <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
+          <application android:label="파닉스" android:icon="@drawable/app_icon" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
+              <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+            </application>
+          </manifest>
+          XML
+          cat > app/src/main/java/com/creep1020/phonics150/MainActivity.kt <<'KOTLIN'
+          package com.creep1020.phonics150
+          import android.Manifest
+          import android.app.Activity
+          import android.content.pm.PackageManager
+          import android.media.MediaExtractor
+          import android.media.MediaCodec
+          import android.media.MediaFormat
+          import java.io.ByteArrayOutputStream
+          import android.media.MediaRecorder
+          import android.media.AudioRecord
+          import android.media.AudioFormat
+          import android.speech.tts.TextToSpeech
+          import android.widget.Toast
+          import java.io.RandomAccessFile
+          import android.os.Bundle
+          import android.webkit.*
+          import android.util.Base64
+          import com.google.mlkit.genai.common.FeatureStatus
+          import com.google.mlkit.genai.common.audio.AudioSource
+          import com.google.mlkit.genai.speechrecognition.*
+          import kotlinx.coroutines.*
+          import kotlinx.coroutines.flow.collect
+          import kotlinx.coroutines.flow.first
+          import org.json.JSONObject
+          import java.io.File
+          import java.util.Locale
+
+          class MainActivity : Activity() {
+            private lateinit var web: WebView
+            private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+            private var recorder: MediaRecorder? = null
+            @Volatile private var capturing = false
+            private var writer: Thread? = null
+            @Volatile private var captureError: String? = null
+            private var tts: TextToSpeech? = null
+            @Volatile private var englishReady = false
+            private var file: File? = null
+            private var active: String? = null
+            private var job: Job? = null
+            private val url = "https://creep1020.github.io/phonics150/"
+            override fun onCreate(state: Bundle?) {
+              super.onCreate(state)
+              tts = TextToSpeech(this) { code ->
+                runOnUiThread {
+                  if (code == TextToSpeech.SUCCESS) {
+                    val language = tts?.setLanguage(Locale.US) ?: TextToSpeech.LANG_NOT_SUPPORTED
+                    englishReady = language >= TextToSpeech.LANG_AVAILABLE
+                    if (!englishReady) englishReady = (tts?.setLanguage(Locale.ENGLISH) ?: -2) >= 0
+                    Toast.makeText(this, "v10 TTS: $language / $englishReady", Toast.LENGTH_LONG).show()
+                  }
+                }
+              }
+              web = WebView(this)
+              setContentView(web)
+              web.settings.javaScriptEnabled = true
+              web.settings.domStorageEnabled = true
+              web.settings.allowFileAccess = false
+              web.settings.allowContentAccess = false
+              web.settings.mediaPlaybackRequiresUserGesture = false
+              web.webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
+                  return r.url.scheme != "https" || r.url.host != "creep1020.github.io" || !(r.url.path ?: "").startsWith("/phonics150/")
+                }
+              }
+              web.addJavascriptInterface(Bridge(), "IlbbangAndroid")
+              web.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+              web.clearCache(true)
+              web.loadUrl(url + "?native=10")
+            }
+            private fun status(id: String, s: String) { web.evaluateJavascript("window.onIlbbangNativeVoiceStatus?.(${JSONObject.quote(id)},${JSONObject.quote(s)})", null) }
+            private fun result(id: String, text: String, error: String, audio: String = "") {
+              if (active != id) return
+              val obj = JSONObject().put("requestId",id).put("transcript",text).put("error",error).put("audioBase64",audio).put("mimeType","audio/mp4")
+              if (error.isNotBlank()) Toast.makeText(this, "음성인식: $error", Toast.LENGTH_LONG).show()
+              active = null
+              file?.delete(); file = null
+              web.evaluateJavascript("window.onIlbbangNativeVoiceResult?.($obj)", null)
+            }
+            inner class Bridge {
+              @JavascriptInterface fun canSpeakEnglish(): Boolean = true
+              @JavascriptInterface fun speak(text: String, rate: Float) { runOnUiThread {
+                if (englishReady) { tts?.setSpeechRate(rate.coerceIn(0.3f, 2f)); val rc = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "phonics-tts"); if(rc != TextToSpeech.SUCCESS) Toast.makeText(this@MainActivity, "TTS 오류: $rc", Toast.LENGTH_LONG).show() }
+                else Toast.makeText(this@MainActivity, "영어 TTS 음성을 확인해 주세요.", Toast.LENGTH_LONG).show()
+              } }
+              @JavascriptInterface fun speakLesson(payload: String) { runOnUiThread {
+                val engine = tts ?: return@runOnUiThread
+                try {
+                  engine.stop()
+                  val parts = org.json.JSONArray(payload)
+                  engine.setSpeechRate(0.75f)
+                  for (i in 0 until parts.length()) {
+                    val part = parts.getJSONObject(i)
+                    val locale = if (part.getString("lang") == "ko-KR") Locale.KOREA else Locale.US
+                    if (engine.setLanguage(locale) < TextToSpeech.LANG_AVAILABLE) {
+                      engine.stop()
+                      Toast.makeText(this@MainActivity, "한국어 또는 영어 TTS 음성 데이터를 확인해 주세요.", Toast.LENGTH_LONG).show()
+                      break
+                    }
+                    engine.speak(part.getString("text"), TextToSpeech.QUEUE_ADD, null, "lesson-$i")
+                  }
+                } catch (e: Exception) { Toast.makeText(this@MainActivity, "본문 읽기 오류", Toast.LENGTH_LONG).show() }
+                finally { engine.setLanguage(Locale.US) }
+              } }
+              @JavascriptInterface fun stopSpeaking() { runOnUiThread { tts?.stop() } }
+              @JavascriptInterface fun startRecording(id: String, mode: String) { runOnUiThread {
+                if (active != null) return@runOnUiThread
+                active = id
+                status(id,"preparing")
+                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 10) else begin(id)
+              } }
+              @JavascriptInterface fun stopRecording(id: String) { runOnUiThread { finishVoice(id) } }
+              @JavascriptInterface fun cancelRecording(id: String) { runOnUiThread { if (active == id) clearVoice() } }
+            }
+            override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
+              super.onRequestPermissionsResult(requestCode,permissions,results)
+              if(requestCode == 10) active?.let { if(results.firstOrNull() == PackageManager.PERMISSION_GRANTED) begin(it) else result(it,"","마이크 권한이 필요해요.") }
+            }
+            private fun wavHeader(out: RandomAccessFile, bytes: Int) {
+              fun le32(n: Int) { out.writeInt(Integer.reverseBytes(n)) }
+              fun le16(n: Int) { out.writeShort(java.lang.Short.reverseBytes(n.toShort()).toInt()) }
+              out.seek(0); out.writeBytes("RIFF"); le32(36 + bytes); out.writeBytes("WAVEfmt "); le32(16)
+              le16(1); le16(1); le32(16000); le32(32000); le16(2); le16(16); out.writeBytes("data"); le32(bytes)
+            }
+            private fun begin(id: String) {
+              try {
+                tts?.stop()
+                file = File.createTempFile("phonics-", ".m4a", cacheDir)
+                val r = MediaRecorder(this)
+                recorder = r
+                r.setAudioSource(MediaRecorder.AudioSource.MIC)
+                r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                r.setOutputFile(file!!.absolutePath)
+                r.prepare(); r.start()
+                captureError = null
+                status(id,"recording")
+              } catch(e: Exception) { stopCapture(); result(id,"",e.message ?: "녹음 시작 실패") }
+            }
+            private fun stopCapture() {
+              recorder?.let { r -> try { r.stop() } catch(e: Exception) { captureError = e.message ?: "녹음 종료 실패" } finally { r.release() } }
+              recorder = null
+            }
+            // Decode the saved recording; preserve the original M4A for playback.
+            private fun recognitionWav(input: File): File {
+              val extractor = MediaExtractor()
+              var decoder: MediaCodec? = null
+              try {
+                extractor.setDataSource(input.absolutePath)
+                val track = (0 until extractor.trackCount).first { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                extractor.selectTrack(track)
+                val format = extractor.getTrackFormat(track)
+                val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+                decoder = codec
+                codec.configure(format, null, null, 0); codec.start()
+                var rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                val pcm = ByteArrayOutputStream()
+                val info = MediaCodec.BufferInfo()
+                var sent = false; var done = false
+                val deadline = android.os.SystemClock.elapsedRealtime() + 15000
+                while (!done && android.os.SystemClock.elapsedRealtime() < deadline) {
+                  if (!sent) {
+                    val i = codec.dequeueInputBuffer(10000)
+                    if (i >= 0) {
+                      val b = codec.getInputBuffer(i)!!; b.clear()
+                      val n = extractor.readSampleData(b, 0)
+                      if (n < 0) { codec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); sent = true }
+                      else { codec.queueInputBuffer(i, 0, n, extractor.sampleTime, 0); extractor.advance() }
+                    }
+                  }
+                  val o = codec.dequeueOutputBuffer(info, 10000)
+                  if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    val fmt = codec.outputFormat
+                    rate = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE); channels = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    if (fmt.containsKey(MediaFormat.KEY_PCM_ENCODING)) require(fmt.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_16BIT) { "PCM encoding unsupported" }
+                  } else if (o >= 0) {
+                    if (info.size > 0) { val b = codec.getOutputBuffer(o)!!; b.position(info.offset); b.limit(info.offset + info.size); val chunk = ByteArray(info.size); b.get(chunk); pcm.write(chunk) }
+                    done = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                    codec.releaseOutputBuffer(o, false)
+                  }
+                }
+                require(done) { "Audio decode timeout" }
+                val raw = pcm.toByteArray(); val frames = raw.size / (2 * channels)
+                require(frames > 0 && rate > 0) { "Empty decoded audio" }
+                val mono = ShortArray(frames) { i ->
+                  var sum = 0
+                  for (c in 0 until channels) { val k = (i * channels + c) * 2; sum += ((raw[k].toInt() and 255) or (raw[k+1].toInt() shl 8)).toShort().toInt() }
+                  (sum / channels).toShort()
+                }
+                val count = (frames.toLong() * 16000 / rate).toInt().coerceAtLeast(1)
+                val samples = ByteArray(count * 2)
+                for (i in 0 until count) {
+                  val pos = i.toDouble() * rate / 16000; val j = pos.toInt().coerceAtMost(frames-1); val k = (j+1).coerceAtMost(frames-1)
+                  val v = (mono[j] + (mono[k]-mono[j]) * (pos-j)).toInt().coerceIn(-32768,32767)
+                  samples[i*2] = v.toByte(); samples[i*2+1] = (v shr 8).toByte()
+                }
+                val output = File.createTempFile("recognition-", ".wav", cacheDir)
+                RandomAccessFile(output,"rw").use { out ->
+                  val lead = ByteArray(6400); val tail = ByteArray(32000)
+                  wavHeader(out, lead.size + samples.size + tail.size)
+                  out.write(lead); out.write(samples); out.write(tail)
+                }
+                return output
+              } finally { try { decoder?.release() } finally { extractor.release() } }
+            }
+            private fun finishVoice(id: String) {
+              if(active != id || recorder == null) return
+              stopCapture()
+              if(captureError != null) { result(id,"",captureError!!); return }
+              val f = file ?: return
+              status(id,"checking")
+              job = scope.launch {
+                var audio = ""
+                try {
+                  audio = withContext(Dispatchers.IO) { Base64.encodeToString(f.readBytes(), Base64.NO_WRAP) }
+                  val client = SpeechRecognition.getClient(speechRecognizerOptions { locale = Locale.US; preferredMode = SpeechRecognizerOptions.Mode.MODE_BASIC })
+                  try {
+                    withTimeout(55000) {
+                      if(client.checkStatus() == FeatureStatus.DOWNLOADABLE) { status(id,"downloading"); client.download().first { it is com.google.mlkit.genai.common.DownloadStatus.DownloadCompleted } }
+                      if(client.checkStatus() != FeatureStatus.AVAILABLE) error("영어 음성인식 모델을 사용할 수 없어요.")
+                    }
+                    status(id,"model-ready")
+                    status(id,"recognizing")
+                    val parts = mutableListOf<String>()
+                    var partial = ""
+                    withTimeout(30000) {
+                      val prepared = withContext(Dispatchers.IO) { recognitionWav(f) }
+                      val source = AudioSource.fromFile(prepared)
+                      try {
+                        client.startRecognition(speechRecognizerRequest { audioSource = source }).first { response ->
+                          when(response) {
+                            is SpeechRecognizerResponse.FinalTextResponse -> parts.add(response.text)
+                            is SpeechRecognizerResponse.PartialTextResponse -> partial = response.text
+                            is SpeechRecognizerResponse.ErrorResponse -> if (parts.isEmpty() && partial.isBlank()) error(response.e.message ?: "인식 오류") else Unit
+                            else -> Unit
+                          }
+                          response is SpeechRecognizerResponse.CompletedResponse || response is SpeechRecognizerResponse.ErrorResponse
+                        }
+                      } finally { source.close(); prepared.delete() }
+                    }
+                    val text = parts.joinToString(" ").ifBlank { partial }
+                    result(id,text,if(text.isBlank()) "인식 결과 없음" else "",audio)
+                  } finally { client.close() }
+                } catch(e: Exception) { if(active == id) result(id,"",e.javaClass.simpleName + ": " + (e.message ?: "음성인식 실패"),audio) }
+              }
+            }
+            private fun clearVoice() { active=null; job?.cancel(); job=null; stopCapture(); file?.delete(); file=null }
+            override fun onDestroy() { clearVoice(); scope.cancel(); tts?.stop(); tts?.shutdown(); web.removeJavascriptInterface("IlbbangAndroid"); web.destroy(); super.onDestroy() }
+          }
+          KOTLIN
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PHONICS150-native-voice-v10
+          path: app/build/outputs/apk/debug/app-debug.apk
