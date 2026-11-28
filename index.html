@@ -160,11 +160,7 @@ if ('serviceWorker' in navigator) {
 <input type="file" id="backupFile" accept="application/json,.json" style="display:none">
 <div class="small" id="backupStatus" aria-live="polite" style="margin-top:9px">기기 변경이나 앱 초기화 전에 백업해 주세요.</div>
 </section>
-<section class="panel" id="cloudPanel">
-<strong style="font-size:14px">👨‍👧 부모 · 자녀 학습 공유</strong>
-<p class="small" style="margin:8px 0 0">같은 공용 계정으로 로그인하고 프로필을 선택하면 가족 구성원별 학습 기록을 따로 관리할 수 있어요.</p>
-<div class="status" style="margin-top:10px">프로필마다 학습 진도, 완료 기록, 연속 학습, 별 포인트, 배지와 복습 목록이 분리됩니다. 기존 기록은 첫 프로필로 보존해 옮깁니다.</div>
-</section>
+
 <section class="panel calendar">
 <div class="calendar-head"><button id="prevMonth">‹</button><strong id="monthTitle">학습 기록</strong><button id="nextMonth">›</button></div>
 <div class="calendar-grid" id="calendar"></div><div id="lessonHistory" style="margin-top:12px"></div>
@@ -1104,7 +1100,7 @@ $('showReview').onclick=()=>{listMode='review';render()};
 $('reviewMicBtn').onclick=()=>{if(!reviewListening)stopEnglishSpeech();startReviewSpeaking();};
 $('stopIntro').onclick=()=>{stopEnglishSpeech();$('introStatus').textContent='재생을 정지했어요.';};
 $('readIntro').onclick=()=>{
- if(nativeVoicePending||activeNo!==null||reviewListening)return;
+ if(nativeVoicePending||activeNo!==null||reviewListening){$('introStatus').textContent='녹음이 끝난 후 본문을 재생해 주세요.';return;}
  stopEnglishSpeech();
  const data=DATA[currentDay()-1];
  const parts=[data.title,...data.intro,'오늘의 핵심 소리: '+data.core].flatMap(p=>String(p).split(/([A-Za-z]+(?:[’'\-][A-Za-z]+)*(?:[ ,·]+[A-Za-z]+(?:[’'\-][A-Za-z]+)*)*)/g).filter(t=>t.trim()).map(t=>({text:t,lang:/[A-Za-z]/.test(t)?'en-US':'ko-KR'})));
@@ -1123,25 +1119,30 @@ $('sentenceList').addEventListener('change',e=>{
 const BACKUP_KEYS=['phonics150SeqRecords','phonics150SeqStart','phonics150SeqChecked','phonics150SeqReview',REVIEW_SCHEDULE_KEY,DAILY_REVIEW_KEY,REVIEW_RESET_KEY,'phonics150VoiceRate',REWARD_KEY,REDEEM_KEY,REWARD_SHOP_KEY,KEKE_PROGRESS_KEY,SPEAKING_PASS_KEY,SPEAKING_ATTEMPT_KEY];
 function collectBackup(){const data={};BACKUP_KEYS.forEach(k=>{const v=localStorage.getItem(k);if(v!==null)data[k]=v;});return {app:'phonics150Seq',version:1,createdAt:new Date().toISOString(),data};}
 $('exportBackup').onclick=()=>{
- try{const payload=collectBackup();const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`일빵빵_학습기록_백업_${iso(new Date())}.json`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);$('backupStatus').textContent='백업 파일을 저장했어요. 파일을 안전한 곳에 보관해 주세요.';}
+ try{const payload=collectBackup();if(window.IlbbangAndroid?.saveBackup){window.IlbbangAndroid.saveBackup(JSON.stringify(payload,null,2));return;}const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`파닉스_학습기록_백업_${iso(new Date())}.json`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);$('backupStatus').textContent='백업 파일을 저장했어요. 파일을 안전한 곳에 보관해 주세요.';}
  catch(err){$('backupStatus').textContent='백업 파일을 만들지 못했어요: '+err.message;}
 };
-$('importBackup').onclick=()=>$('backupFile').click();
+let backupProfile='';const backupProfileId=()=>$('profileSelect')?.value||'';
+$('importBackup').onclick=()=>{backupProfile=backupProfileId();if(window.IlbbangAndroid?.openBackup)window.IlbbangAndroid.openBackup();else $('backupFile').click();};
+window.onPhonicsBackupStatus=msg=>{$('backupStatus').textContent=msg;};
+window.onPhonicsBackupRead=async raw=>{if(backupProfile!==backupProfileId()){window.onPhonicsBackupStatus('프로필이 변경되어 복원을 취소했어요.');return;}await restoreBackup(raw);};
 $('backupFile').onchange=async e=>{
  const file=e.target.files&&e.target.files[0];if(!file)return;
- try{const obj=JSON.parse(await file.text());if(obj.app!=='phonics150Seq'||!obj.data||typeof obj.data!=='object')throw new Error('일빵빵 백업 파일이 아닙니다.');
+ try{await restoreBackup(await file.text());}finally{e.target.value='';}
+};
+async function restoreBackup(raw){
+ try{const obj=JSON.parse(raw);if(obj.app!=='phonics150Seq'||!obj.data||typeof obj.data!=='object')throw new Error('파닉스 백업 파일이 아닙니다.');
   const valid=['phonics150SeqRecords','phonics150SeqChecked','phonics150SeqReview',REVIEW_SCHEDULE_KEY,DAILY_REVIEW_KEY,REWARD_KEY,REDEEM_KEY,REWARD_SHOP_KEY,KEKE_PROGRESS_KEY,SPEAKING_PASS_KEY,SPEAKING_ATTEMPT_KEY];
   for(const k of valid){if(obj.data[k]!==undefined){const parsed=JSON.parse(obj.data[k]);if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('백업 데이터 형식이 올바르지 않습니다.');}}
   if(obj.data.phonics150SeqStart!==undefined&&!/^\d{4}-\d{2}-\d{2}$/.test(obj.data.phonics150SeqStart))throw new Error('학습 시작일 데이터가 올바르지 않습니다.');
   if(obj.data.phonics150VoiceRate!==undefined&&(!Number.isFinite(Number(obj.data.phonics150VoiceRate))||Number(obj.data.phonics150VoiceRate)<0.5||Number(obj.data.phonics150VoiceRate)>2))throw new Error('음성 속도 데이터가 올바르지 않습니다.');
-  if(!confirm('현재 이 휴대폰의 일빵빵 학습 기록을 백업 파일의 기록으로 덮어쓸까요? 백업에 없는 항목은 현재 값을 유지합니다.'))return;
+  if(!confirm('현재 선택한 프로필의 파닉스 학습 기록을 백업 파일의 기록으로 덮어쓸까요? 백업에 없는 항목은 현재 값을 유지합니다.'))return;
   BACKUP_KEYS.forEach(k=>{if(Object.prototype.hasOwnProperty.call(obj.data,k))localStorage.setItem(k,obj.data[k]);});
   $('startDate').value=localStorage.getItem('phonics150SeqStart')||iso(today);
   const rate=localStorage.getItem('phonics150VoiceRate');if(rate){$('voiceRate').value=rate;$('rateLabel').textContent=Number(rate).toFixed(2)+'배';}
   previewDay=null;render();$('backupStatus').textContent='백업 기록을 복원했어요. 학습 달력과 문장 체크를 확인해 보세요.';
  }catch(err){$('backupStatus').textContent='복원 실패: '+err.message;}
- finally{e.target.value='';}
-};
+ }
 
 $('rewardOptions').addEventListener('click',e=>{
  const btn=e.target.closest('[data-reward]');if(!btn)return;
@@ -1169,7 +1170,7 @@ $('parentRewardCatalog').addEventListener('click',e=>{
  const save=e.target.closest('[data-save-reward]'),del=e.target.closest('[data-delete-reward]');if(!save&&!del)return;
  if(window.ilbbangIsParentSettingsUnlocked?.()!==true)return;
  const shop=rewardShopData();
- if(del){const id=del.dataset.deleteReward;if(Object.values(shop.requests).some(x=>x&&x.rewardId===id&&['pending','approved'].includes(x.status))){$('parentRewardStatus').textContent='신청 또는 사용 대기 중인 보상이 있어 삭제할 수 없어요.';return;}shop.rewards=shop.rewards.filter(x=>x.id!==id);saveRewardShop(shop);return;}
+ if(del){const id=del.dataset.deleteReward;if(!confirm('보상 목록에서 삭제할까요? 기존 신청 및 사용 기록은 유지됩니다. 공통 보상에 연결된 경우 다른 앱의 목록에도 반영됩니다.'))return;shop.rewards=shop.rewards.filter(x=>x.id!==id);saveRewardShop(shop);$('parentRewardStatus').textContent='보상 항목을 삭제했어요.';return;}
  const id=save.dataset.saveReward,r=shop.rewards.find(x=>x.id===id);if(!r)return;
  const title=$('parentRewardCatalog').querySelector(`[data-edit-title="${CSS.escape(id)}"]`)?.value.trim();
  const cost=Number($('parentRewardCatalog').querySelector(`[data-edit-cost="${CSS.escape(id)}"]`)?.value);

@@ -69,6 +69,7 @@ jobs:
           package com.creep1020.phonics150
           import android.Manifest
           import android.app.Activity
+          import android.content.Intent
           import android.content.pm.PackageManager
           import android.media.MediaExtractor
           import android.media.MediaCodec
@@ -101,6 +102,10 @@ jobs:
             private var writer: Thread? = null
             @Volatile private var captureError: String? = null
             private var tts: TextToSpeech? = null
+            private var koreanTts: TextToSpeech? = null
+            private var koreanReady = false
+            private var lessonJob: Job? = null
+            private var backupPayload: String? = null
             @Volatile private var englishReady = false
             private var file: File? = null
             private var active: String? = null
@@ -118,8 +123,10 @@ jobs:
                   }
                 }
               }
+              koreanTts = TextToSpeech(this) { code -> runOnUiThread { koreanReady = code == TextToSpeech.SUCCESS && (koreanTts?.setLanguage(Locale.KOREA) ?: -2) >= 0 } }
               web = WebView(this)
               setContentView(web)
+              web.webChromeClient = WebChromeClient()
               web.settings.javaScriptEnabled = true
               web.settings.domStorageEnabled = true
               web.settings.allowFileAccess = false
@@ -133,7 +140,7 @@ jobs:
               web.addJavascriptInterface(Bridge(), "IlbbangAndroid")
               web.settings.cacheMode = WebSettings.LOAD_NO_CACHE
               web.clearCache(true)
-              web.loadUrl(url + "?native=10")
+              web.loadUrl(url + "?native=11")
             }
             private fun status(id: String, s: String) { web.evaluateJavascript("window.onIlbbangNativeVoiceStatus?.(${JSONObject.quote(id)},${JSONObject.quote(s)})", null) }
             private fun result(id: String, text: String, error: String, audio: String = "") {
@@ -147,29 +154,47 @@ jobs:
             inner class Bridge {
               @JavascriptInterface fun canSpeakEnglish(): Boolean = true
               @JavascriptInterface fun speak(text: String, rate: Float) { runOnUiThread {
+                stopLesson()
                 if (englishReady) { tts?.setSpeechRate(rate.coerceIn(0.3f, 2f)); val rc = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "phonics-tts"); if(rc != TextToSpeech.SUCCESS) Toast.makeText(this@MainActivity, "TTS 오류: $rc", Toast.LENGTH_LONG).show() }
                 else Toast.makeText(this@MainActivity, "영어 TTS 음성을 확인해 주세요.", Toast.LENGTH_LONG).show()
               } }
               @JavascriptInterface fun speakLesson(payload: String) { runOnUiThread {
-                val engine = tts ?: return@runOnUiThread
-                try {
-                  engine.stop()
-                  val parts = org.json.JSONArray(payload)
-                  engine.setSpeechRate(0.75f)
-                  for (i in 0 until parts.length()) {
-                    val part = parts.getJSONObject(i)
-                    val locale = if (part.getString("lang") == "ko-KR") Locale.KOREA else Locale.US
-                    if (engine.setLanguage(locale) < TextToSpeech.LANG_AVAILABLE) {
-                      engine.stop()
-                      Toast.makeText(this@MainActivity, "한국어 또는 영어 TTS 음성 데이터를 확인해 주세요.", Toast.LENGTH_LONG).show()
-                      break
+                stopLesson()
+                lessonJob = scope.launch {
+                  try {
+                    val parts = org.json.JSONArray(payload)
+                    for (i in 0 until parts.length()) {
+                      val part = parts.getJSONObject(i)
+                      val ko = part.getString("lang") == "ko-KR"
+                      val engine = (if (ko) koreanTts else tts) ?: error("TTS 초기화 중")
+                      if (ko && !koreanReady || !ko && !englishReady) error("한국어 또는 영어 음성 데이터가 필요합니다")
+                      engine.setSpeechRate(0.75f)
+                      val done = CompletableDeferred<Unit>()
+                      val uid = "lesson-$i-${System.nanoTime()}"
+                      engine.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                        override fun onStart(id: String?) {}
+                        override fun onDone(id: String?) { if (id == uid) done.complete(Unit) }
+                        override fun onError(id: String?) { if (id == uid) done.completeExceptionally(IllegalStateException("TTS 재생 오류")) }
+                      })
+                      if (engine.speak(part.getString("text"), TextToSpeech.QUEUE_FLUSH, null, uid) != TextToSpeech.SUCCESS) error("TTS 재생 실패")
+                      withTimeout(60000) { done.await() }
+                      delay(100)
                     }
-                    engine.speak(part.getString("text"), TextToSpeech.QUEUE_ADD, null, "lesson-$i")
-                  }
-                } catch (e: Exception) { Toast.makeText(this@MainActivity, "본문 읽기 오류", Toast.LENGTH_LONG).show() }
-                finally { engine.setLanguage(Locale.US) }
+                  } catch (e: CancellationException) { throw e }
+                  catch (e: Exception) { Toast.makeText(this@MainActivity, "본문 읽기: ${e.message}", Toast.LENGTH_LONG).show() }
+                }
               } }
-              @JavascriptInterface fun stopSpeaking() { runOnUiThread { tts?.stop() } }
+              @JavascriptInterface fun stopSpeaking() { runOnUiThread { stopLesson() } }
+              @JavascriptInterface fun saveBackup(payload: String) { runOnUiThread {
+                if (backupPayload != null) return@runOnUiThread
+                backupPayload = payload
+                try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json").putExtra(Intent.EXTRA_TITLE,"phonics-backup.json"), 701) }
+                catch (e: Exception) { backupPayload = null; backupStatus("저장 실패: ${e.message}") }
+              } }
+              @JavascriptInterface fun openBackup() { runOnUiThread {
+                try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), 702) }
+                catch (e: Exception) { backupStatus("파일 열기 실패: ${e.message}") }
+              } }
               @JavascriptInterface fun startRecording(id: String, mode: String) { runOnUiThread {
                 if (active != null) return@runOnUiThread
                 active = id
@@ -313,7 +338,28 @@ jobs:
               }
             }
             private fun clearVoice() { active=null; job?.cancel(); job=null; stopCapture(); file?.delete(); file=null }
-            override fun onDestroy() { clearVoice(); scope.cancel(); tts?.stop(); tts?.shutdown(); web.removeJavascriptInterface("IlbbangAndroid"); web.destroy(); super.onDestroy() }
+            private fun stopLesson() { lessonJob?.cancel(); lessonJob = null; tts?.stop(); koreanTts?.stop() }
+            private fun backupStatus(msg: String) { web.evaluateJavascript("window.onPhonicsBackupStatus?.(${JSONObject.quote(msg)})", null) }
+            override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+              super.onActivityResult(requestCode,resultCode,data)
+              if (requestCode != 701 && requestCode != 702) return
+              val payload = backupPayload
+              if (requestCode == 701) backupPayload = null
+              val uri = data?.data
+              if (resultCode != RESULT_OK || uri == null) { backupStatus("파일 선택을 취소했어요."); return }
+              try {
+                if (requestCode == 701) {
+                  val output = contentResolver.openOutputStream(uri) ?: error("파일 열기 실패")
+                  output.use { it.write((payload ?: error("백업 데이터 없음")).toByteArray(Charsets.UTF_8)) }
+                  backupStatus("백업 파일을 저장했어요.")
+                } else {
+                  val input = contentResolver.openInputStream(uri) ?: error("파일 열기 실패")
+                  val raw = input.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                  web.evaluateJavascript("window.onPhonicsBackupRead?.(${JSONObject.quote(raw)})", null)
+                }
+              } catch (e: Exception) { backupStatus("파일 처리 실패: ${e.message}") }
+            }
+            override fun onDestroy() { stopLesson(); koreanTts?.shutdown(); clearVoice(); scope.cancel(); tts?.stop(); tts?.shutdown(); web.removeJavascriptInterface("IlbbangAndroid"); web.destroy(); super.onDestroy() }
           }
           KOTLIN
       - name: Build APK
