@@ -45,7 +45,16 @@ jobs:
           android {
             namespace 'com.creep1020.phonics150'
             compileSdk 35
-            defaultConfig { applicationId 'com.creep1020.phonics150.nativevoice'; minSdk 31; targetSdk 35; versionCode 15; versionName '1.15-fix5' }
+            defaultConfig { applicationId 'com.creep1020.phonics150.stable'; minSdk 31; targetSdk 35; versionCode 16; versionName '1.16-stable' }
+            signingConfigs {
+              stable {
+                storeFile file(System.getenv("PHONICS_KEYSTORE_PATH"))
+                storePassword System.getenv("PHONICS_KEY_PASSWORD")
+                keyAlias "phonics"
+                keyPassword System.getenv("PHONICS_KEY_PASSWORD")
+              }
+            }
+            buildTypes { debug { signingConfig signingConfigs.stable } }
             compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
             
           }
@@ -373,9 +382,20 @@ jobs:
             override fun onDestroy() { stopLesson(); koreanTts?.shutdown(); clearVoice(); scope.cancel(); tts?.stop(); tts?.shutdown(); web.removeJavascriptInterface("IlbbangAndroid"); web.destroy(); super.onDestroy() }
           }
           KOTLIN
-      - name: Build APK
-        run: gradle assembleDebug --no-daemon
+      - name: Build APK with permanent signing key
+        env:
+          PHONICS_KEY_B64: ${{ secrets.PHONICS_KEY_B64 }}
+          PHONICS_KEY_PASSWORD: ${{ secrets.PHONICS_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$PHONICS_KEY_B64" && test -n "$PHONICS_KEY_PASSWORD"
+          export PHONICS_KEYSTORE_PATH="$RUNNER_TEMP/phonics.p12"
+          printf '%s' "$PHONICS_KEY_B64" | base64 --decode > "$PHONICS_KEYSTORE_PATH"
+          chmod 600 "$PHONICS_KEYSTORE_PATH"
+          trap 'rm -f "$PHONICS_KEYSTORE_PATH"' EXIT
+          gradle assembleDebug --no-daemon
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: PHONICS150-fix5
+          name: PHONICS150-stable16
           path: app/build/outputs/apk/debug/app-debug.apk
