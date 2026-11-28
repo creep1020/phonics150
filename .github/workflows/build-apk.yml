@@ -45,7 +45,7 @@ jobs:
           android {
             namespace 'com.creep1020.phonics150'
             compileSdk 35
-            defaultConfig { applicationId 'com.creep1020.phonics150.stable'; minSdk 31; targetSdk 35; versionCode 18; versionName '1.18-stable' }
+            defaultConfig { applicationId 'com.creep1020.phonics150.stable'; minSdk 31; targetSdk 35; versionCode 21; versionName '1.21-stable' }
             signingConfigs {
               stable {
                 storeFile file(System.getenv("PHONICS_KEYSTORE_PATH"))
@@ -132,7 +132,7 @@ jobs:
                   }
                 }
               }
-              koreanTts = TextToSpeech(this) { code -> runOnUiThread { koreanReady = code == TextToSpeech.SUCCESS && (koreanTts?.setLanguage(Locale.KOREA) ?: -2) >= 0 } }
+              koreanTts = TextToSpeech(this, { code -> runOnUiThread { koreanReady = code == TextToSpeech.SUCCESS && (koreanTts?.setLanguage(Locale.KOREA) ?: -2) >= 0 } }, "com.google.android.tts")
               web = WebView(this)
               setContentView(web)
               web.webChromeClient = object : WebChromeClient() {
@@ -155,7 +155,7 @@ jobs:
               web.settings.cacheMode = WebSettings.LOAD_NO_CACHE
               ServiceWorkerController.getInstance().serviceWorkerWebSettings.cacheMode = WebSettings.LOAD_NO_CACHE
               web.clearCache(true)
-              web.loadUrl(url + "?native=15&rev=1128fix5")
+              web.loadUrl(url + "?native=21&rev=1128stable21")
             }
             private fun status(id: String, s: String) { web.evaluateJavascript("window.onIlbbangNativeVoiceStatus?.(${JSONObject.quote(id)},${JSONObject.quote(s)})", null) }
             private fun result(id: String, text: String, error: String, audio: String = "") {
@@ -167,7 +167,7 @@ jobs:
               web.evaluateJavascript("window.onIlbbangNativeVoiceResult?.($obj)", null)
             }
             inner class Bridge {
-              @JavascriptInterface fun appRevision(): String = "fix5 / 15"
+              @JavascriptInterface fun appRevision(): String = "stable21 / 21"
               @JavascriptInterface fun canSpeakEnglish(): Boolean = true
               @JavascriptInterface fun speak(text: String, rate: Float) { runOnUiThread {
                 stopLesson()
@@ -196,7 +196,10 @@ jobs:
                       })
                       if (engine.speak(part.getString("text"), TextToSpeech.QUEUE_FLUSH, null, uid) != TextToSpeech.SUCCESS) error("TTS 재생 실패")
                       withTimeout(60000) { done.await() }
-                      delay(100)
+                      if (i + 1 < parts.length()) {
+                        val ending = part.getString("text").trimEnd().lastOrNull()
+                        if (ending != null && ending in ".!?。！？") delay(180)
+                      }
                     }
                     lessonStatus("본문 읽기 완료")
                   } catch (e: CancellationException) { throw e }
@@ -397,5 +400,5 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: PHONICS150-stable18
+          name: PHONICS150-stable21
           path: app/build/outputs/apk/debug/app-debug.apk
