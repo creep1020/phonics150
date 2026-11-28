@@ -126,7 +126,12 @@ jobs:
               koreanTts = TextToSpeech(this) { code -> runOnUiThread { koreanReady = code == TextToSpeech.SUCCESS && (koreanTts?.setLanguage(Locale.KOREA) ?: -2) >= 0 } }
               web = WebView(this)
               setContentView(web)
-              web.webChromeClient = WebChromeClient()
+              web.webChromeClient = object : WebChromeClient() {
+                override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: JsResult): Boolean {
+                  android.app.AlertDialog.Builder(this@MainActivity).setMessage(message).setPositiveButton("확인") { _, _ -> result.confirm() }.setNegativeButton("취소") { _, _ -> result.cancel() }.setOnCancelListener { result.cancel() }.show()
+                  return true
+                }
+              }
               web.settings.javaScriptEnabled = true
               web.settings.domStorageEnabled = true
               web.settings.allowFileAccess = false
@@ -140,7 +145,7 @@ jobs:
               web.addJavascriptInterface(Bridge(), "IlbbangAndroid")
               web.settings.cacheMode = WebSettings.LOAD_NO_CACHE
               web.clearCache(true)
-              web.loadUrl(url + "?native=11")
+              web.loadUrl(url + "?native=12&rev=1128fix4")
             }
             private fun status(id: String, s: String) { web.evaluateJavascript("window.onIlbbangNativeVoiceStatus?.(${JSONObject.quote(id)},${JSONObject.quote(s)})", null) }
             private fun result(id: String, text: String, error: String, audio: String = "") {
@@ -155,7 +160,7 @@ jobs:
               @JavascriptInterface fun canSpeakEnglish(): Boolean = true
               @JavascriptInterface fun speak(text: String, rate: Float) { runOnUiThread {
                 stopLesson()
-                if (englishReady) { tts?.setSpeechRate(rate.coerceIn(0.3f, 2f)); val rc = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "phonics-tts"); if(rc != TextToSpeech.SUCCESS) Toast.makeText(this@MainActivity, "TTS 오류: $rc", Toast.LENGTH_LONG).show() }
+                if (englishReady) { tts?.setLanguage(Locale.US); tts?.setSpeechRate(rate.coerceIn(0.3f, 2f)); val rc = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "phonics-tts"); if(rc != TextToSpeech.SUCCESS) Toast.makeText(this@MainActivity, "TTS 오류: $rc", Toast.LENGTH_LONG).show() }
                 else Toast.makeText(this@MainActivity, "영어 TTS 음성을 확인해 주세요.", Toast.LENGTH_LONG).show()
               } }
               @JavascriptInterface fun speakLesson(payload: String) { runOnUiThread {
@@ -166,8 +171,10 @@ jobs:
                     for (i in 0 until parts.length()) {
                       val part = parts.getJSONObject(i)
                       val ko = part.getString("lang") == "ko-KR"
-                      val engine = (if (ko) koreanTts else tts) ?: error("TTS 초기화 중")
-                      if (ko && !koreanReady || !ko && !englishReady) error("한국어 또는 영어 음성 데이터가 필요합니다")
+                      val engine = (if (ko && koreanReady) koreanTts else tts) ?: error("TTS 초기화 중")
+                      val language = if (ko) Locale.KOREA else Locale.US
+                      if (engine.setLanguage(language) < 0) error(if (ko) "한국어 TTS 음성 데이터가 필요합니다" else "영어 TTS 음성 데이터가 필요합니다")
+                      lessonStatus("본문 읽는 중 · ${i+1}/${parts.length()} · 0.75배")
                       engine.setSpeechRate(0.75f)
                       val done = CompletableDeferred<Unit>()
                       val uid = "lesson-$i-${System.nanoTime()}"
@@ -180,8 +187,9 @@ jobs:
                       withTimeout(60000) { done.await() }
                       delay(100)
                     }
+                    lessonStatus("본문 읽기 완료")
                   } catch (e: CancellationException) { throw e }
-                  catch (e: Exception) { Toast.makeText(this@MainActivity, "본문 읽기: ${e.message}", Toast.LENGTH_LONG).show() }
+                  catch (e: Exception) { lessonStatus("본문 읽기 실패: ${e.message}"); Toast.makeText(this@MainActivity, "본문 읽기: ${e.message}", Toast.LENGTH_LONG).show() }
                 }
               } }
               @JavascriptInterface fun stopSpeaking() { runOnUiThread { stopLesson() } }
@@ -339,6 +347,7 @@ jobs:
             }
             private fun clearVoice() { active=null; job?.cancel(); job=null; stopCapture(); file?.delete(); file=null }
             private fun stopLesson() { lessonJob?.cancel(); lessonJob = null; tts?.stop(); koreanTts?.stop() }
+            private fun lessonStatus(msg: String) { web.evaluateJavascript("window.onPhonicsLessonStatus?.(${JSONObject.quote(msg)})", null) }
             private fun backupStatus(msg: String) { web.evaluateJavascript("window.onPhonicsBackupStatus?.(${JSONObject.quote(msg)})", null) }
             override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
               super.onActivityResult(requestCode,resultCode,data)
@@ -366,5 +375,5 @@ jobs:
         run: gradle assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: PHONICS150-native-voice-v10
+          name: PHONICS150-fix4
           path: app/build/outputs/apk/debug/app-debug.apk
