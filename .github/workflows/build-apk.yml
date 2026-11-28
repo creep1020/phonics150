@@ -45,7 +45,7 @@ jobs:
           android {
             namespace 'com.creep1020.phonics150'
             compileSdk 35
-            defaultConfig { applicationId 'com.creep1020.phonics150.stable'; minSdk 31; targetSdk 35; versionCode 22; versionName '1.22-stable' }
+            defaultConfig { applicationId 'com.creep1020.phonics150.stable'; minSdk 31; targetSdk 35; versionCode 23; versionName '1.23-stable' }
             signingConfigs {
               stable {
                 storeFile file(System.getenv("PHONICS_KEYSTORE_PATH"))
@@ -158,7 +158,7 @@ jobs:
               web.settings.cacheMode = WebSettings.LOAD_NO_CACHE
               ServiceWorkerController.getInstance().serviceWorkerWebSettings.cacheMode = WebSettings.LOAD_NO_CACHE
               web.clearCache(true)
-              web.loadUrl(url + "?native=22&rev=1128stable22")
+              web.loadUrl(url + "?native=23&rev=1128stable23")
             }
             private fun status(id: String, s: String) { web.evaluateJavascript("window.onIlbbangNativeVoiceStatus?.(${JSONObject.quote(id)},${JSONObject.quote(s)})", null) }
             private fun result(id: String, text: String, error: String, audio: String = "") {
@@ -170,7 +170,7 @@ jobs:
               web.evaluateJavascript("window.onIlbbangNativeVoiceResult?.($obj)", null)
             }
             inner class Bridge {
-              @JavascriptInterface fun appRevision(): String = "stable22 / 22"
+              @JavascriptInterface fun appRevision(): String = "stable23 / 23"
               @JavascriptInterface fun canSpeakEnglish(): Boolean = true
               @JavascriptInterface fun speak(text: String, rate: Float) { runOnUiThread {
                 stopLesson()
@@ -417,5 +417,5 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: PHONICS150-stable22
+          name: PHONICS150-stable23
           path: app/build/outputs/apk/debug/app-debug.apk
