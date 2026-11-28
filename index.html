@@ -1106,11 +1106,11 @@ $('readIntro').onclick=()=>{
  stopEnglishSpeech();
  const data=DATA[currentDay()-1];
  const parts=[data.title,...data.intro,'오늘의 핵심 소리: '+(data.core||'')].flatMap(p=>String(p).split(/([A-Za-z]+(?:[’'\-][A-Za-z]+)*(?:[ ,·]+[A-Za-z]+(?:[’'\-][A-Za-z]+)*)*)/g).filter(t=>t.trim()).map(t=>({text:t,lang:/[A-Za-z]/.test(t)?'en-US':'ko-KR'})));
- if(typeof window.IlbbangAndroid?.speakLesson==='function'){window.IlbbangAndroid.speakLesson(JSON.stringify(parts));$('introStatus').textContent='본문 읽기 · 0.75배';return;}
+ if(typeof window.IlbbangAndroid?.speakLesson==='function'){window.IlbbangAndroid.speakLesson(JSON.stringify(parts));$('introStatus').textContent='본문 읽기 · 1배';return;}
  if(window.IlbbangAndroid){$('introStatus').textContent='본문 연결 없음 · APK '+(window.IlbbangAndroid.appRevision?.()||'이전 버전');return;}
  if(!window.speechSynthesis){$('introStatus').textContent='이 기기는 본문 음성을 지원하지 않아요.';return;}
- for(const part of parts){const u=new SpeechSynthesisUtterance(part.text);u.lang=part.lang;u.rate=0.75;window.speechSynthesis.speak(u);}
- $('introStatus').textContent='본문 읽기 · 0.75배';
+ for(const part of parts){const u=new SpeechSynthesisUtterance(part.text);u.lang=part.lang;u.rate=1.0;window.speechSynthesis.speak(u);}
+ $('introStatus').textContent='본문 읽기 · 1배';
 };
 $('sentenceList').addEventListener('change',e=>{
  const no=e.target.getAttribute('data-check');if(!no)return;
