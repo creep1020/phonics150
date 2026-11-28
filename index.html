@@ -83,7 +83,7 @@ button{cursor:pointer}button:disabled{opacity:.4;cursor:default}.primary{backgro
 </style>
 </head>
  <script>
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && !window.IlbbangAndroid) {
   let appRefreshing = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (appRefreshing) return;
@@ -99,7 +99,7 @@ if ('serviceWorker' in navigator) {
 }
  </script>
 <body><main>
-<header><div><div class="kicker">PHONICS 150 · READING · 수정 4</div><strong>150강 · 소리 조립부터 스스로 읽기까지</strong></div><div class="day" id="dayBadge">DAY 1 / 30</div></header>
+<header><div><div class="kicker">PHONICS 150 · READING · 수정 5</div><strong>150강 · 소리 조립부터 스스로 읽기까지</strong></div><div class="day" id="dayBadge">DAY 1 / 30</div></header>
 <h1>PHONICS 150 순차 학습</h1><p class="sub" id="dateLabel"></p>
 <section class="panel" id="dayControlsPanel">
 <div class="controls"><label for="startDate">학습 시작일</label><input type="date" id="startDate"><button id="apply">적용</button><button id="today">오늘의 DAY</button></div>
@@ -865,7 +865,7 @@ function render(){
  const reviewLocked=!!reviewModeNow;
  $('phonicsLessonTitle').textContent=data.title;
  $('phonicsLessonStory').innerHTML=data.intro.map(p=>`<p style="line-height:1.7">${escapeHtml(p)}</p>`).join('');
- $('phonicsLessonCore').textContent='오늘의 핵심 소리: '+data.core;
+ $('phonicsLessonCore').textContent='오늘의 핵심 소리: '+(data.core||'');
  $('dayBadge').textContent=`강의 ${day} / 150`;
  $('dateLabel').textContent=previewDay===null?today.toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'}):`DAY ${day} 학습`;
  $('daySelect').value=String(day);
@@ -1100,13 +1100,14 @@ $('showReview').onclick=()=>{listMode='review';render()};
 $('reviewMicBtn').onclick=()=>{if(!reviewListening)stopEnglishSpeech();startReviewSpeaking();};
 $('stopIntro').onclick=()=>{stopEnglishSpeech();$('introStatus').textContent='재생을 정지했어요.';};
 window.onPhonicsLessonStatus=msg=>{$('introStatus').textContent=msg;};
+document.querySelector('.kicker').textContent+=' · APK '+(window.IlbbangAndroid?.appRevision?.()|| (window.IlbbangAndroid?'이전 버전':'웹'));
 $('readIntro').onclick=()=>{
  if(nativeVoicePending||activeNo!==null||reviewListening){$('introStatus').textContent='녹음이 끝난 후 본문을 재생해 주세요.';return;}
  stopEnglishSpeech();
  const data=DATA[currentDay()-1];
- const parts=[data.title,...data.intro,'오늘의 핵심 소리: '+data.core].flatMap(p=>String(p).split(/([A-Za-z]+(?:[’'\-][A-Za-z]+)*(?:[ ,·]+[A-Za-z]+(?:[’'\-][A-Za-z]+)*)*)/g).filter(t=>t.trim()).map(t=>({text:t,lang:/[A-Za-z]/.test(t)?'en-US':'ko-KR'})));
+ const parts=[data.title,...data.intro,'오늘의 핵심 소리: '+(data.core||'')].flatMap(p=>String(p).split(/([A-Za-z]+(?:[’'\-][A-Za-z]+)*(?:[ ,·]+[A-Za-z]+(?:[’'\-][A-Za-z]+)*)*)/g).filter(t=>t.trim()).map(t=>({text:t,lang:/[A-Za-z]/.test(t)?'en-US':'ko-KR'})));
  if(typeof window.IlbbangAndroid?.speakLesson==='function'){window.IlbbangAndroid.speakLesson(JSON.stringify(parts));$('introStatus').textContent='본문 읽기 · 0.75배';return;}
- if(window.IlbbangAndroid){$('introStatus').textContent='본문 읽기는 새 APK 설치 후 사용할 수 있어요.';return;}
+ if(window.IlbbangAndroid){$('introStatus').textContent='본문 연결 없음 · APK '+(window.IlbbangAndroid.appRevision?.()||'이전 버전');return;}
  if(!window.speechSynthesis){$('introStatus').textContent='이 기기는 본문 음성을 지원하지 않아요.';return;}
  for(const part of parts){const u=new SpeechSynthesisUtterance(part.text);u.lang=part.lang;u.rate=0.75;window.speechSynthesis.speak(u);}
  $('introStatus').textContent='본문 읽기 · 0.75배';
@@ -1125,7 +1126,7 @@ $('exportBackup').onclick=()=>{
 };
 function phonicsConfirm(message){return new Promise(resolve=>{const overlay=document.createElement('div');overlay.style.cssText='position:fixed;inset:0;z-index:2147483647;background:#0008;display:grid;place-items:center;padding:20px';const panel=document.createElement('div');panel.style.cssText='background:white;color:#222;border-radius:16px;padding:20px;max-width:420px;width:100%';const text=document.createElement('p');text.textContent=message;const yes=document.createElement('button'),no=document.createElement('button');yes.textContent='확인';no.textContent='취소';yes.style.marginRight='12px';panel.append(text,yes,no);overlay.append(panel);document.body.append(overlay);const finish=v=>{overlay.remove();resolve(v)};yes.onclick=()=>finish(true);no.onclick=()=>finish(false);});}
 let backupProfile='';const backupProfileId=()=>$('profileSelect')?.value||'';
-$('importBackup').onclick=()=>{backupProfile=backupProfileId();if(window.IlbbangAndroid?.openBackup){$('backupStatus').textContent='백업 파일 선택 중…';window.IlbbangAndroid.openBackup();}else if(window.IlbbangAndroid){$('backupStatus').textContent='새 APK 설치가 필요합니다.';}else $('backupFile').click();};
+$('importBackup').onclick=()=>{backupProfile=backupProfileId();if(window.IlbbangAndroid?.openBackup){$('backupStatus').textContent='백업 파일 선택 중…';window.IlbbangAndroid.openBackup();}else if(window.IlbbangAndroid){$('backupStatus').textContent='백업 연결 없음 · APK '+(window.IlbbangAndroid.appRevision?.()||'이전 버전');}else $('backupFile').click();};
 window.onPhonicsBackupStatus=msg=>{$('backupStatus').textContent=msg;};
 window.onPhonicsBackupRead=async raw=>{$('backupStatus').textContent='백업 파일을 읽었어요. 확인 중…';if(backupProfile!==backupProfileId()){window.onPhonicsBackupStatus('프로필이 변경되어 복원을 취소했어요.');return;}await restoreBackup(raw);};
 $('backupFile').onchange=async e=>{
@@ -1168,11 +1169,12 @@ $('childRewardHistory').addEventListener('click',e=>{
  if(!confirm('이 보상을 실제로 사용했나요? 사용 완료로 기록할까요?'))return;
  item.status='used';item.usedAt=new Date().toISOString();saveRewardShop(shop);
 });
+function bindParentRewardControls(){
 $('parentRewardCatalog').addEventListener('click',async e=>{
  const save=e.target.closest('[data-save-reward]'),del=e.target.closest('[data-delete-reward]');if(!save&&!del)return;
- if(window.ilbbangIsParentSettingsUnlocked?.()!==true)return;
+ if(window.ilbbangIsParentSettingsUnlocked?.()!==true){$('parentRewardStatus').textContent='부모 PIN을 먼저 해제하세요.';return;}
  const shop=rewardShopData();
- if(del){const id=del.dataset.deleteReward;const profile=backupProfileId();if(!await phonicsConfirm('보상 목록에서 삭제할까요? 기존 신청 및 사용 기록은 유지됩니다. 공통 보상에 연결된 경우 다른 앱의 목록에도 반영됩니다.'))return;if(profile!==backupProfileId()||window.ilbbangIsParentSettingsUnlocked?.()!==true)return;const latest=rewardShopData();latest.rewards=latest.rewards.filter(x=>x.id!==id);saveRewardShop(latest);$('parentRewardStatus').textContent='보상 항목을 삭제했어요.';return;}
+ if(del){const id=del.dataset.deleteReward;const profile=backupProfileId();if(!await phonicsConfirm('보상 목록에서 삭제할까요? 기존 신청 및 사용 기록은 유지됩니다. 공통 보상에 연결된 경우 다른 앱의 목록에도 반영됩니다.'))return;if(profile!==backupProfileId()||window.ilbbangIsParentSettingsUnlocked?.()!==true){$('parentRewardStatus').textContent='프로필 또는 부모 잠금 상태가 변경되었습니다.';return;}const latest=rewardShopData();latest.rewards=latest.rewards.filter(x=>x.id!==id);saveRewardShop(latest);try{if(window.ilbbangSaveSharedRewardShop)await window.ilbbangSaveSharedRewardShop(latest);$('parentRewardStatus').textContent='보상 항목을 삭제했어요.';}catch(err){$('parentRewardStatus').textContent='보상 동기화 실패: '+err.message;}return;}
  const id=save.dataset.saveReward,r=shop.rewards.find(x=>x.id===id);if(!r)return;
  const title=$('parentRewardCatalog').querySelector(`[data-edit-title="${CSS.escape(id)}"]`)?.value.trim();
  const cost=Number($('parentRewardCatalog').querySelector(`[data-edit-cost="${CSS.escape(id)}"]`)?.value);
@@ -1181,14 +1183,14 @@ $('parentRewardCatalog').addEventListener('click',async e=>{
  Object.assign(r,{title,cost,desc});saveRewardShop(shop);$('parentRewardStatus').textContent='보상 항목을 저장했어요.';
 });
 $('parentRewardAdd').addEventListener('click',()=>{
- if(window.ilbbangIsParentSettingsUnlocked?.()!==true)return;
+ if(window.ilbbangIsParentSettingsUnlocked?.()!==true){$('parentRewardStatus').textContent='부모 PIN을 먼저 해제하세요.';return;}
  const title=$('parentRewardNewTitle').value.trim(),cost=Number($('parentRewardNewCost').value),desc=$('parentRewardNewDesc').value.trim();
  if(!title||!Number.isInteger(cost)||cost<1||cost>420){$('parentRewardStatus').textContent='보상 이름과 별 개수(1~420)를 입력해 주세요.';return;}
  const shop=rewardShopData();shop.rewards.push({id:'custom_reward_'+Date.now(),title,cost,desc});saveRewardShop(shop);
  $('parentRewardNewTitle').value='';$('parentRewardNewCost').value='';$('parentRewardNewDesc').value='';$('parentRewardStatus').textContent='새 보상을 추가했어요.';
 });
 $('parentRewardRequests').addEventListener('click',e=>{
- if(window.ilbbangIsParentSettingsUnlocked?.()!==true)return;
+ if(window.ilbbangIsParentSettingsUnlocked?.()!==true){$('parentRewardStatus').textContent='부모 PIN을 먼저 해제하세요.';return;}
  const approve=e.target.closest('[data-parent-approve]'),reject=e.target.closest('[data-parent-reject]'),used=e.target.closest('[data-parent-used]'),cancel=e.target.closest('[data-parent-cancel]');
  const btn=approve||reject||used||cancel;if(!btn)return;
  const shop=rewardShopData(),id=btn.dataset.parentApprove||btn.dataset.parentReject||btn.dataset.parentUsed||btn.dataset.parentCancel,item=shop.requests[id];if(!item)return;
@@ -1202,6 +1204,7 @@ $('parentRewardRequests').addEventListener('click',e=>{
  else if(cancel&&item.status==='approved') {if(!confirm('승인을 취소하고 차감된 별을 복구할까요?'))return;item.status='cancelled';item.cancelledAt=new Date().toISOString();}
  saveRewardShop(shop);
 });
+}
 $('sentenceList').addEventListener('click',e=>{
  const recordBtn=e.target.closest('[data-record]');
  if(recordBtn){
@@ -1478,6 +1481,7 @@ panel.innerHTML = `
   <div class="small" id="loginMessage" style="margin-top:10px" aria-live="polite"></div>
 `;
 document.querySelector('main').prepend(panel);
+bindParentRewardControls();
 const $login = id => document.getElementById(id);
 const message = value => { $login('loginMessage').textContent = value; };
 const status = value => { $login('loginStatus').textContent = value; };
