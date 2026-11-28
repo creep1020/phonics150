@@ -45,7 +45,7 @@ jobs:
           android {
             namespace 'com.creep1020.phonics150'
             compileSdk 35
-            defaultConfig { applicationId 'com.creep1020.phonics150.stable'; minSdk 31; targetSdk 35; versionCode 21; versionName '1.21-stable' }
+            defaultConfig { applicationId 'com.creep1020.phonics150.stable'; minSdk 31; targetSdk 35; versionCode 22; versionName '1.22-stable' }
             signingConfigs {
               stable {
                 storeFile file(System.getenv("PHONICS_KEYSTORE_PATH"))
@@ -114,6 +114,9 @@ jobs:
             private var koreanTts: TextToSpeech? = null
             private var koreanReady = false
             private var lessonJob: Job? = null
+            private var lessonPayload: String? = null
+            private var lessonIndex = 0
+            private var lessonPaused = false
             private var backupPayload: String? = null
             @Volatile private var englishReady = false
             private var file: File? = null
@@ -155,7 +158,7 @@ jobs:
               web.settings.cacheMode = WebSettings.LOAD_NO_CACHE
               ServiceWorkerController.getInstance().serviceWorkerWebSettings.cacheMode = WebSettings.LOAD_NO_CACHE
               web.clearCache(true)
-              web.loadUrl(url + "?native=21&rev=1128stable21")
+              web.loadUrl(url + "?native=22&rev=1128stable22")
             }
             private fun status(id: String, s: String) { web.evaluateJavascript("window.onIlbbangNativeVoiceStatus?.(${JSONObject.quote(id)},${JSONObject.quote(s)})", null) }
             private fun result(id: String, text: String, error: String, audio: String = "") {
@@ -167,7 +170,7 @@ jobs:
               web.evaluateJavascript("window.onIlbbangNativeVoiceResult?.($obj)", null)
             }
             inner class Bridge {
-              @JavascriptInterface fun appRevision(): String = "stable21 / 21"
+              @JavascriptInterface fun appRevision(): String = "stable22 / 22"
               @JavascriptInterface fun canSpeakEnglish(): Boolean = true
               @JavascriptInterface fun speak(text: String, rate: Float) { runOnUiThread {
                 stopLesson()
@@ -176,10 +179,22 @@ jobs:
               } }
               @JavascriptInterface fun speakLesson(payload: String) { runOnUiThread {
                 stopLesson()
+                lessonPayload = payload
+                playLesson()
+              } }
+              @JavascriptInterface fun toggleLessonPause() { runOnUiThread {
+                if (lessonPaused) { lessonPaused = false; playLesson() }
+                else if (lessonJob?.isActive == true) {
+                  lessonPaused = true; lessonJob?.cancel(); lessonJob = null; tts?.stop(); koreanTts?.stop(); lessonStatus("본문 일시정지")
+                }
+              } }
+              private fun playLesson() {
+                val payload = lessonPayload ?: return
                 lessonJob = scope.launch {
                   try {
                     val parts = org.json.JSONArray(payload)
-                    for (i in 0 until parts.length()) {
+                    for (i in lessonIndex until parts.length()) {
+                      lessonIndex = i
                       val part = parts.getJSONObject(i)
                       val ko = part.getString("lang") == "ko-KR"
                       val engine = (if (ko && koreanReady) koreanTts else tts) ?: error("TTS 초기화 중")
@@ -196,16 +211,18 @@ jobs:
                       })
                       if (engine.speak(part.getString("text"), TextToSpeech.QUEUE_FLUSH, null, uid) != TextToSpeech.SUCCESS) error("TTS 재생 실패")
                       withTimeout(60000) { done.await() }
+                      lessonIndex = i + 1
                       if (i + 1 < parts.length()) {
                         val ending = part.getString("text").trimEnd().lastOrNull()
                         if (ending != null && ending in ".!?。！？") delay(180)
                       }
                     }
+                    lessonPayload = null; lessonIndex = 0; lessonPaused = false
                     lessonStatus("본문 읽기 완료")
                   } catch (e: CancellationException) { throw e }
-                  catch (e: Exception) { lessonStatus("본문 읽기 실패: ${e.message}"); Toast.makeText(this@MainActivity, "본문 읽기: ${e.message}", Toast.LENGTH_LONG).show() }
+                  catch (e: Exception) { lessonPayload = null; lessonIndex = 0; lessonPaused = false; lessonStatus("본문 읽기 실패: ${e.message}"); Toast.makeText(this@MainActivity, "본문 읽기: ${e.message}", Toast.LENGTH_LONG).show() }
                 }
-              } }
+              }
               @JavascriptInterface fun stopSpeaking() { runOnUiThread { stopLesson() } }
               @JavascriptInterface fun saveBackup(payload: String) { runOnUiThread {
                 if (backupPayload != null) return@runOnUiThread
@@ -360,7 +377,7 @@ jobs:
               }
             }
             private fun clearVoice() { active=null; job?.cancel(); job=null; stopCapture(); file?.delete(); file=null }
-            private fun stopLesson() { lessonJob?.cancel(); lessonJob = null; tts?.stop(); koreanTts?.stop() }
+            private fun stopLesson() { val wasReading = lessonPayload != null; lessonJob?.cancel(); lessonJob = null; lessonPayload = null; lessonIndex = 0; lessonPaused = false; tts?.stop(); koreanTts?.stop(); if (wasReading) lessonStatus("본문 재생 종료") }
             private fun lessonStatus(msg: String) { web.evaluateJavascript("window.onPhonicsLessonStatus?.(${JSONObject.quote(msg)})", null) }
             private fun backupStatus(msg: String) { web.evaluateJavascript("window.onPhonicsBackupStatus?.(${JSONObject.quote(msg)})", null) }
             override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -400,5 +417,5 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: PHONICS150-stable21
+          name: PHONICS150-stable22
           path: app/build/outputs/apk/debug/app-debug.apk
