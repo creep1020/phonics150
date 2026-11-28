@@ -45,7 +45,7 @@ jobs:
           android {
             namespace 'com.creep1020.phonics150'
             compileSdk 35
-            defaultConfig { applicationId 'com.creep1020.phonics150.stable'; minSdk 31; targetSdk 35; versionCode 16; versionName '1.16-stable' }
+            defaultConfig { applicationId 'com.creep1020.phonics150.stable'; minSdk 31; targetSdk 35; versionCode 18; versionName '1.18-stable' }
             signingConfigs {
               stable {
                 storeFile file(System.getenv("PHONICS_KEYSTORE_PATH"))
@@ -185,8 +185,8 @@ jobs:
                       val engine = (if (ko && koreanReady) koreanTts else tts) ?: error("TTS 초기화 중")
                       val language = if (ko) Locale.KOREA else Locale.US
                       if (engine.setLanguage(language) < 0) error(if (ko) "한국어 TTS 음성 데이터가 필요합니다" else "영어 TTS 음성 데이터가 필요합니다")
-                      lessonStatus("본문 읽는 중 · ${i+1}/${parts.length()} · 0.75배")
-                      engine.setSpeechRate(0.75f)
+                      lessonStatus("본문 읽는 중 · ${i+1}/${parts.length()} · 1배")
+                      engine.setSpeechRate(1.0f)
                       val done = CompletableDeferred<Unit>()
                       val uid = "lesson-$i-${System.nanoTime()}"
                       engine.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
@@ -397,5 +397,5 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: PHONICS150-stable16
+          name: PHONICS150-stable18
           path: app/build/outputs/apk/debug/app-debug.apk
